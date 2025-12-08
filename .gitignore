@@ -1,0 +1,13 @@
+# 环境变量 
+.env  
+
+# 开源项目 
+ai-hedge-fund/
+AgentLightning/  
+
+# 数据文件
+data/
+
+# 日志文件
+*.log
+log/
