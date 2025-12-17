@@ -14,3 +14,7 @@ log/
 
 # 临时文件
 tmp/
+
+# csmar的相关文件
+csmar.log 
+token.txt
