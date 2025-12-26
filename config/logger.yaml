@@ -1,0 +1,14 @@
+logger:
+  level: 'DEBUG'
+  default_prefix: '[Logger]'
+handlers:
+  file_names: 'logs/app'
+  level: 'DEBUG'
+  when: 'midnight'
+  interval: 1
+  backup_count: 5
+  encoding: 'utf-8'
+  delay: False
+  utc: False
+formatter:
+  datetime_format: '%Y-%m-%d %H:%M:%S'

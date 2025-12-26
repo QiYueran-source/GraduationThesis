@@ -4,6 +4,7 @@
 # 开源项目 
 ai-hedge-fund/
 AgentLightning/  
+TwinMarket/
 
 # 数据文件
 data/
@@ -18,3 +19,6 @@ tmp/
 # csmar的相关文件
 csmar.log 
 token.txt
+
+# 模型文件
+llm/
