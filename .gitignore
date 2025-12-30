@@ -1,0 +1,24 @@
+# 环境变量 
+.env  
+
+# 开源项目 
+ai-hedge-fund/
+AgentLightning/  
+TwinMarket/
+
+# 数据文件
+data/
+
+# 日志文件
+*.log
+log/
+
+# 临时文件
+tmp/
+
+# csmar的相关文件
+csmar.log 
+token.txt
+
+# 模型文件
+llm/
