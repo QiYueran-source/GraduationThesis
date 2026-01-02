@@ -1,0 +1,11 @@
+node_num: 2
+
+node1:
+  name: 'home_server_1'
+  ip: '127.0.0.1'
+  port: 8899
+
+node2:
+  name: 'home_server_2'
+  ip: '127.0.0.2'
+  port: 8899

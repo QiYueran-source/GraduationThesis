@@ -1,0 +1,45 @@
+{
+    "name": "Node Agent Development",
+    "dockerFile": "../Dockerfile",  // 使用项目根目录的Dockerfile
+    "context": "..",               // 构建上下文为上级目录
+    
+    // 容器配置
+    "containerEnv": {
+        "NODE_ID": "dev_node_001",
+        "REDIS_HOST": "host.docker.internal",
+        "PYTHONPATH": "/node"
+    },
+    
+    // 端口转发
+    "forwardPorts": [8000, 6379],
+    
+    // 挂载卷
+    "mounts": [
+        "source=${localWorkspaceFolder}/logs,target=/node/logs,type=bind",
+        "source=${localWorkspaceFolder}/data,target=/node/data,type=bind"
+    ],
+    
+    // 扩展安装
+    "extensions": [
+        "ms-python.python",
+        "ms-python.black-formatter",
+        "ms-python.isort",
+        "ms-toolsai.jupyter",
+        "redhat.vscode-yaml",
+        "ms-vscode.vscode-json"
+    ],
+    
+    // 工作区设置
+    "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.formatting.provider": "black",
+        "python.linting.enabled": true,
+        "python.linting.pylintEnabled": true
+    },
+    
+    // 启动后运行的命令
+    "postStartCommand": "echo 'Development container started!'",
+    
+    // 远程用户
+    "remoteUser": "nodeuser"
+}
