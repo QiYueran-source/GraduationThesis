@@ -5,11 +5,11 @@ auth.method = "token"
 auth.token = "Season2004!!!qyr94666"
 
 [log]
-to = "./logs/frpc.log"
+to = "/Node/logs/frpc.log"
 level = "info"
 
 [[proxies]]
-name = "node_agent_c0223387e2ab_new"
+name = "node_agent_$(hostname)_$(uuidgen | cut -d'-' -f1)"
 type = "tcp"
 localIP = "127.0.0.1"
 localPort = 4321

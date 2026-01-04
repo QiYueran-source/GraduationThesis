@@ -11,10 +11,12 @@ opensource_program/
 
 # 数据文件
 data/
+!Node/data 
 
 # 日志文件
 *.log
 logs/
+!Node/logs
 
 # 临时文件
 tmp/
