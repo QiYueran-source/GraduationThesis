@@ -1,0 +1,5 @@
+connection: 15
+batch_size: 10000
+partition_num: 2
+engine: 'adbc'
+max_workers: 10

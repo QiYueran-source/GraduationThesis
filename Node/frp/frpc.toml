@@ -1,9 +1,16 @@
-serverAddr = "127.0.0.1"
+serverAddr = "43.139.192.176"
 serverPort = 7000
 
+auth.method = "token"
+auth.token = "Season2004!!!qyr94666"
+
+[log]
+to = "./logs/frpc.log"
+level = "info"
+
 [[proxies]]
-name = "test-tcp"
+name = "node_agent_c0223387e2ab_new"
 type = "tcp"
 localIP = "127.0.0.1"
-localPort = 22
-remotePort = 6000
+localPort = 4321
+remotePort = 8195

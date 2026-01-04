@@ -7,14 +7,24 @@ RUN apt-get update && apt-get install -y \
     git \
     build-essential \
     libgomp1 \
+    procps \
+    sudo \
+    net-tools \
+    iproute2 \
+    lsof \
+    vim \
+    nano \
     && rm -rf /var/lib/apt/lists/*
 
 # 创建工作目录
 WORKDIR /Node
 
-# 创建非root用户
+# 创建非root用户并配置sudo权限
 RUN useradd --create-home --shell /bin/bash agentuser && \
-    chown -R agentuser:agentuser /Node
+    chown -R agentuser:agentuser /Node && \
+    usermod -aG sudo agentuser && \
+    echo "agentuser ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/agentuser && \
+    chmod 0440 /etc/sudoers.d/agentuser
 USER agentuser
 
 # 复制依赖文件
@@ -37,9 +47,15 @@ ENV NODE_TYPE=agent_trainer
 # 暴露端口（用于接受启动任务）
 EXPOSE 8192
 
-# 健康检查
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python scripts/health_check.py || exit 1
+# 健康检查（暂时注释掉，因为health_check.py文件不存在）
+# HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+#     CMD python scripts/health_check.py || exit 1
+
+# 启动frp服务
+CMD ["/Node/frp/frpc", "-c", "/Node/frp/frpc.toml"]
 
 # 启动命令
 CMD ["python", "worker.py"]
+
+# 开发环境设置 
+CMD ["sleep", "infinity"]

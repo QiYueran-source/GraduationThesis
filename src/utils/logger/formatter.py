@@ -7,7 +7,7 @@ import logging
 import yaml
 
 # 配置和常量  
-with open('config/logger.yaml', 'r', encoding = 'utf-8') as f:
+with open('src/config/logger.yaml', 'r', encoding = 'utf-8') as f:
     LOGGER_CONFIG = yaml.safe_load(f).get('core', {})
 
 # 常量 

@@ -25,19 +25,19 @@ log_warn() {
 
 echo "=== frp客户端状态检查 ==="
 
-# 检查frp进程
-if pgrep -f "frpc -c frp/frpc.ini" > /dev/null; then
-    FRP_PID=$(pgrep -f "frpc -c frp/frpc.ini")
+# 检查frp进程（使用 ps 替代 pgrep，兼容没有 procps 的环境）
+FRP_PID=$(ps aux 2>/dev/null | grep -v grep | grep "frpc -c frp/frpc.toml" | awk '{print $2}' | head -1)
+if [ -n "$FRP_PID" ]; then
     log_info "frp客户端运行中 (PID: $FRP_PID)"
 else
     log_error "frp客户端未运行"
 fi
 
 # 检查配置文件
-if [ -f "frp/frpc.ini" ]; then
-    echo -e "${BLUE}[配置]${NC} frpc.ini 存在"
+if [ -f "frp/frpc.toml" ]; then
+    echo -e "${BLUE}[配置]${NC} frpc.toml 存在"
 else
-    log_error "frpc.ini 配置文件不存在"
+    log_error "frpc.toml 配置文件不存在"
 fi
 
 # 检查日志文件

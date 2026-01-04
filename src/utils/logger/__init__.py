@@ -12,7 +12,7 @@ from .handler import create_date_rotating_handler
 from .formatter import create_formatter
 
 # 配置和常量  
-with open('config/logger.yaml', 'r', encoding = 'utf-8') as f:
+with open('src/config/logger.yaml', 'r', encoding = 'utf-8') as f:
     LOGGER_CONFIG = yaml.safe_load(f).get('logger', {})
 
 # 常量 

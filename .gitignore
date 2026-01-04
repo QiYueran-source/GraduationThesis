@@ -2,16 +2,14 @@
 .env  
 
 # 开源项目 
-ai-hedge-fund/
-AgentLightning/  
-TwinMarket/
+opensource_program/
 
 # 数据文件
 data/
 
 # 日志文件
 *.log
-log/
+logs/
 
 # 临时文件
 tmp/
@@ -22,3 +20,6 @@ token.txt
 
 # 模型文件
 llm/
+models/
+checkpoint/
+

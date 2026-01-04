@@ -1,0 +1,13 @@
+# redis键值对
+
+# 不过期数据  
+# node数量 gt:node_num:int  
+
+# 节点元数据(node_id在节点上设定)  
+# gt:node_id:元数据(json)
+
+# 金融数据
+# 最小的存储单位是gt:factors:accper:code:因子表 (gt表示毕业论文项目)   
+# 收益率数据gt:return:accper:code:收益率
+# 设置counter计数器记录访问次数 counter:gt:factors:accper:code:因子表  
+# 当访问次数等于node数量后，删除数据  

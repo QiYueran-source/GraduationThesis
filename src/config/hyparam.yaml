@@ -1,0 +1,10 @@
+# 超参数配置 
+# 训练 
+train:
+  window_size: 12 # 训练窗口-12个月   
+  time_step: 1 # 时间步-1个月  
+
+# 评价指标计算  
+performance:
+  risk_free_rate: 0.015 # 无风险利率  
+  standerdize_window: 12 # 标准化窗口-12个月  

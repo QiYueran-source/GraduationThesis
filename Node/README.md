@@ -9,15 +9,15 @@
 # 解压已下载的frp文件
 mkdir -p frp
 tar -xzf frp_0.65.0_linux_amd64.tar.gz -C frp --strip-components=1
-chmod +x frp/frpc frp/frps
+chmod +x frp/frpc
 ```
 
-### 配置frpc.ini
-修改 `frp/frpc.ini` 中的服务器信息：
-- `server_addr`: frp服务器IP地址
-- `server_port`: frp服务器端口（默认7000）
+### 配置frpc.toml
+修改 `frp/frpc.toml` 中的服务器信息：
+- `serverAddr`: frp服务器IP地址或域名
+- `serverPort`: frp服务器端口（默认7000）
 - `token`: 连接令牌
-- `remote_port`: 远程访问端口
+- `proxies[].remotePort`: 远程访问端口
 
 ## 2. frp独立管理
 
@@ -78,8 +78,7 @@ docker run -d --name node-agent graduation-thesis-node
 Node/
 ├── frp/                    # frp文件目录
 │   ├── frpc               # frp客户端
-│   ├── frps               # frp服务端
-│   └── frpc.ini          # 配置文件
+│   └── frpc.toml          # 配置文件
 ├── scripts/               # 管理脚本
 │   ├── frp_start.sh      # frp启动脚本
 │   ├── frp_stop.sh       # frp停止脚本

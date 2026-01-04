@@ -1,22 +1,21 @@
 {
     "name": "Node Agent Development",
-    "dockerFile": "../Dockerfile",  // 使用项目根目录的Dockerfile
-    "context": "..",               // 构建上下文为上级目录
+    "image": "graduation-thesis-node:latest",  // 使用已构建的镜像
     
     // 容器配置
     "containerEnv": {
         "NODE_ID": "dev_node_001",
         "REDIS_HOST": "host.docker.internal",
-        "PYTHONPATH": "/node"
+        "PYTHONPATH": "/Node"
     },
     
     // 端口转发
-    "forwardPorts": [8000, 6379],
+    "forwardPorts": [8192],
     
     // 挂载卷
     "mounts": [
-        "source=${localWorkspaceFolder}/logs,target=/node/logs,type=bind",
-        "source=${localWorkspaceFolder}/data,target=/node/data,type=bind"
+        "source=${localWorkspaceFolder}/logs,target=/Node/logs,type=bind",
+        "source=${localWorkspaceFolder}/data,target=/Node/data,type=bind"
     ],
     
     // 扩展安装
@@ -41,5 +40,5 @@
     "postStartCommand": "echo 'Development container started!'",
     
     // 远程用户
-    "remoteUser": "nodeuser"
+    "remoteUser": "agentuser"
 }
