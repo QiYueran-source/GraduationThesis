@@ -1,6 +1,11 @@
 # 环境变量 
 .env  
 
+# py缓存
+__pycache__/
+*.pyc  
+
+
 # 开源项目 
 opensource_program/
 

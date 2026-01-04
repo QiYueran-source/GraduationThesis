@@ -1,0 +1,32 @@
+# Redis构造函数参数  
+parameters:
+  host: "localhost"          # Redis主机地址
+  port: 6379                 # Redis端口
+  db: 0                      # 数据库编号
+  decode_responses: true     # 自动解码响应为字符串
+
+  # 连接参数
+  socket_timeout: 5          # 套接字超时(秒)
+  socket_connect_timeout: 5  # 连接超时(秒)
+  socket_keepalive: true     # 保持连接
+  socket_keepalive_options:  # TCP保活选项
+    4: 60                    # 4为TCP_KEEPIDLE常数  
+    5: 30                    # 5为TCP_KEEPINTVL常数
+    6: 3                     # 6为TCP_KEEPCNT常数
+
+  # 连接池参数
+  max_connections: 10        # 最大连接数
+  client_name: "graduation_thesis"  # 客户端标识
+
+# 重连机制
+retry:
+  retry_on_timeout: true     # 超时重试
+  max_retries: 3             # 最大重试次数
+  cap_multiplier: 10         # 重试间隔倍数
+  retry_delay: 1             # 重试间隔(秒)
+
+# 监控配置
+monitoring:
+  health_check_interval: 30  # 健康检查间隔(秒)
+  enable_monitoring: true    # 启用状态监控
+
