@@ -27,6 +27,12 @@ retry:
 
 # 监控配置
 monitoring:
-  health_check_interval: 30  # 健康检查间隔(秒)
-  enable_monitoring: true    # 启用状态监控
+  interval: 120              # 监控间隔(秒)
+  max_consecutive_failures: 5 # 最大连续失败次数
+  high_latency_threshold: 100 # 高延迟阈值(毫秒)
+  enable_metrics_logging: true # 启用redis指标记录
+  metrics_logging_interval: 600    # 每600秒记录一次redis指标
+  stop_timeout: 5              # 停止超时(秒)
+  max_wait_checks: 5          # 最大等待检查次数
+  check_interval: 0.5          # 每次检查间隔(秒)
 

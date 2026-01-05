@@ -27,11 +27,19 @@ logger = get_module_logger(__name__, prefix='[RedisConnection]')
 
 # redis连接管理  
 class RedisConnector:
-    def __init__(self):
+    def __init__(self,create_client:bool = True):
+        # 基本配置  
         self._client = None
         self._is_connected = False
         self._last_health_check = 0  
         self._config = {}
+
+        # 加载配置
+        self._load_config()
+
+        # 建立连接 
+        if create_client:
+            self._create_client()
     
     def _load_config(self):
         password = os.getenv('REDIS_PWD', 'failed')
@@ -51,6 +59,7 @@ class RedisConnector:
             raise RedisConfigurationException(f"Redis配置读取失败: {e}")
     
     def _create_client(self):
+        """初始化Redis客户端"""
         param = self._config.get('parameters', {})
         is_retry = self._config.get('retry',{}).get('retry_on_timeout', False)
 
