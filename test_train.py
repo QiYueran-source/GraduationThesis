@@ -2,22 +2,29 @@ import src.set_pypath
 import src.manager.database.factors
 import datetime as dt
 
-from src.manager.redis import RedisConnector
-redis_connector = RedisConnector()
-client = redis_connector.get_client()
+from src.manager.redis import REDIS_CONNECTOR, REDIS_MONITOR
 
-# 存储字符串
-client.set("user:name", "张三")
-client.set("user:age", 25)
+client = REDIS_CONNECTOR.get_client()
 
-# 存储哈希表 (推荐用于结构化数据)
-client.hset("user:1001", "name", "张三")
-client.hset("user:1001", "age", 25)
-client.hset("user:1001", "email", "zhangsan@example.com")
+# 启动监控
+REDIS_MONITOR.start()
 
-# 存储JSON数据
-import json
-user_data = {"name": "张三", "age": 25, "email": "zhangsan@example.com"}
-client.set("user:profile", json.dumps(user_data))
+from src.manager.service import DATABASE_LOADER
+from src.manager.service import MESSAGE_BUS, InitMessage
+print(MESSAGE_BUS.subscribers)
+MESSAGE_BUS.start()
+MESSAGE_BUS.publish(
+    InitMessage(
+        type='init', 
+        payload={'year_list': ['2023', '2024'], 'stock_pool': 'test'}
+        )
+    )
+MESSAGE_BUS.publish(
+    InitMessage(
+        type='init', 
+        payload={'year_list': ['2023', '2024'], 'stock_pool': 'test'}
+        )
+    )
 
-redis_connector.close()
+
+MESSAGE_BUS.stop()

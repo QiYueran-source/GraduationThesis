@@ -30,7 +30,7 @@ logger = get_module_logger(__name__, prefix='[FactorsDatabase]')
 
 
 # 读取因子数据库
-def read_return(
+def get_stock_return(
     code_list: List[str],
     start_date: dt.date,
     end_date: dt.date,

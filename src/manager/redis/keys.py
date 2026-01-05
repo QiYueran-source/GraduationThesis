@@ -1,159 +1,101 @@
 # src/manager/redis/keys.py
 """
-Redis键常量定义
-统一管理所有Redis键的命名约定
+Redis键管理和前缀配置
+基于YAML配置的简单前缀管理系统
 """
 
-from typing import Final
+import yaml
+from typing import Final, Dict, Optional\
 
-# =============================================================================
-# 命名空间前缀
-# =============================================================================
-PROJECT_PREFIX: Final[str] = "gt"  # graduation thesis项目前缀
+# 日志
+from src.utils.logger import get_module_logger
+logger = get_module_logger(__name__, prefix='[RedisKeys]')
 
-# =============================================================================
-# 基础键格式
-# =============================================================================
 
-# 节点管理
-NODE_COUNT_KEY: Final[str] = f"{PROJECT_PREFIX}:node_num"
-NODE_METADATA_KEY_TEMPLATE: Final[str] = f"{PROJECT_PREFIX}:node:{{node_id}}:metadata"
-
-# 数据存储
-TRAIN_DATA_KEY_TEMPLATE: Final[str] = f"{PROJECT_PREFIX}:train:{{accper}}:{{stock_code}}"
-
-# 计数器
-COUNTER_KEY_TEMPLATE: Final[str] = f"counter:{PROJECT_PREFIX}:factors:{{accper}}:{{stock_code}}"
-ACCESS_RECORD_KEY_TEMPLATE: Final[str] = f"access:{{node_id}}:{{accper}}:{{stock_code}}"
-
-# =============================================================================
-# 服务管理键格式
-# =============================================================================
-
-# 清理管理
-CLEANUP_SCHEDULED_KEY_TEMPLATE: Final[str] = f"cleanup:scheduled:{{accper}}:{{stock_code}}"
-CLEANUP_INFO_KEY_TEMPLATE: Final[str] = f"cleanup:info:{{accper}}:{{stock_code}}"
-
-# 队列管理
-QUEUE_LOAD: Final[str] = "data_manager:load"
-QUEUE_UPDATE: Final[str] = "data_manager:update"
-QUEUE_CLEANUP: Final[str] = "data_manager:cleanup"
-
-# 队列状态
-QUEUE_PROCESSING_SUFFIX: Final[str] = ":processing"
-QUEUE_DEAD_LETTER_SUFFIX: Final[str] = ":dead"
-
-# =============================================================================
-# 监控和统计键格式
-# =============================================================================
-
-# 服务状态
-SERVICE_STATUS_KEY: Final[str] = f"{PROJECT_PREFIX}:service:status"
-SERVICE_METRICS_KEY: Final[str] = f"{PROJECT_PREFIX}:service:metrics"
-
-# 健康检查
-HEALTH_CHECK_KEY: Final[str] = f"{PROJECT_PREFIX}:health:check"
-HEALTH_TIMESTAMP_KEY: Final[str] = f"{PROJECT_PREFIX}:health:timestamp"
-
-# =============================================================================
-# 键构建函数
-# =============================================================================
-
-def build_node_metadata_key(node_id: str) -> str:
-    """构建节点元数据键"""
-    return NODE_METADATA_KEY_TEMPLATE.format(node_id=node_id)
-
-def build_train_data_key(accper: str, stock_code: str) -> str:
-    """构建训练数据键"""
-    return TRAIN_DATA_KEY_TEMPLATE.format(accper=accper, stock_code=stock_code)
-
-def build_counter_key(accper: str, stock_code: str) -> str:
-    """构建计数器键"""
-    return COUNTER_KEY_TEMPLATE.format(accper=accper, stock_code=stock_code)
-
-def build_access_record_key(node_id: str, accper: str, stock_code: str) -> str:
-    """构建访问记录键"""
-    return ACCESS_RECORD_KEY_TEMPLATE.format(
-        node_id=node_id, accper=accper, stock_code=stock_code
-    )
-
-def build_cleanup_scheduled_key(accper: str, stock_code: str) -> str:
-    """构建清理调度键"""
-    return CLEANUP_SCHEDULED_KEY_TEMPLATE.format(accper=accper, stock_code=stock_code)
-
-def build_cleanup_info_key(accper: str, stock_code: str) -> str:
-    """构建清理信息键"""
-    return CLEANUP_INFO_KEY_TEMPLATE.format(accper=accper, stock_code=stock_code)
-
-def build_queue_processing_key(queue_name: str) -> str:
-    """构建队列处理中键"""
-    return f"{queue_name}{QUEUE_PROCESSING_SUFFIX}"
-
-def build_queue_dead_letter_key(queue_name: str) -> str:
-    """构建死信队列键"""
-    return f"{queue_name}{QUEUE_DEAD_LETTER_SUFFIX}"
-
-# =============================================================================
-# 键模式匹配
-# =============================================================================
-
-# 数据扫描模式
-TRAIN_DATA_PATTERN: Final[str] = f"{PROJECT_PREFIX}:train:*:*"
-COUNTER_PATTERN: Final[str] = f"counter:{PROJECT_PREFIX}:factors:*:*"
-CLEANUP_SCHEDULED_PATTERN: Final[str] = "cleanup:scheduled:*:*"
-ACCESS_RECORD_PATTERN_TEMPLATE: Final[str] = "access:{{node_id}}:*:*"
-
-def get_train_data_pattern_for_stock(stock_code: str) -> str:
-    """获取指定证券的训练数据模式"""
-    return f"{PROJECT_PREFIX}:train:*:{stock_code}"
-
-def get_counter_pattern_for_stock(stock_code: str) -> str:
-    """获取指定证券的计数器模式"""
-    return f"counter:{PROJECT_PREFIX}:factors:*:{stock_code}"
-
-def get_access_record_pattern_for_node(node_id: str) -> str:
-    """获取指定节点的访问记录模式"""
-    return ACCESS_RECORD_PATTERN_TEMPLATE.format(node_id=node_id)
-
-# =============================================================================
-# 键过期时间
-# =============================================================================
-
-# 默认过期时间（秒）
-DEFAULT_ACCESS_RECORD_TTL: Final[int] = 86400  # 24小时
-DEFAULT_CLEANUP_COUNTDOWN: Final[int] = 300    # 5分钟
-DEFAULT_HEALTH_CHECK_TTL: Final[int] = 60      # 1分钟
-
-# =============================================================================
-# 键验证函数
-# =============================================================================
-
-def validate_key_format(key: str, expected_template: str) -> bool:
-    """验证键格式是否符合模板"""
-    import re
+class RedisPrefixManager:
+    """简化的Redis前缀管理器"""
     
-    # 将模板转换为正则表达式
-    pattern = re.escape(expected_template)
-    pattern = pattern.replace(r"\{.*?\}", ".*")
+    def __init__(self, config_path: str = "src/config/redis.yaml"):
+        self.config_path = config_path
+        self._config = self._load_config()
     
-    return bool(re.match(f"^{pattern}$", key))
+    def _load_config(self) -> Dict[str, str]:
+        """从YAML配置加载前缀"""
+        try:
+            with open(self.config_path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+            
+            prefix_config = config.get('prefix', {})
+            
+            # 默认配置，如果YAML中没有指定
+            defaults = {
+                'project': 'default_project',
+                'system': 'system',
+                'message_bus_queue': 'default_message_bus_queue',
+                'data_tag': 'default_data_tag',
+            }
+            
+            # 合并配置
+            merged_config = {**defaults, **prefix_config}
+            logger.info(f"Redis前缀配置已加载: {merged_config}")
+            
+            return merged_config
+            
+        except Exception as e:
+            logger.warning(f"无法加载前缀配置，使用默认值: {e}")
+            return {
+                'project': 'default_project',
+                'system': 'system',
+                'message_bus_queue': 'default_message_bus_queue',
+                'data_tag': 'default_data_tag',
+            }
+    
+    @property
+    def project_prefix(self) -> str:
+        """获取项目前缀"""
+        return self._config['project']
+    
+    @property
+    def system_prefix(self) -> str:
+        """
+        例如: gt:system 
+        """
+        return ":".join([self.project_prefix, self._config['system']])
+    
+    @property
+    def data_prefix(self) -> str:
+        """
+        例如: gt:data: 具体数据  
+        """
+        return ":".join([self.project_prefix, self._config['data']])
+    
+    @property
+    def message_bus_queue_key(self) -> str:
+        """
+        例如: gt:system:Q
+        """
+        return ":".join([self.system_prefix, self._config['message_bus_queue']])
+    
+    def build_train_data_key(
+        self,
+        year: int,
+        month: int,
+        code: str,
+    ):
+        """
+        构建训练数据键
+        例如: gt:data: date:code: 具体数据  
+        code形如000001
+        """
+        return ":".join([self.data_prefix, f"{year}{month:02d}", code])
 
-def parse_train_data_key(key: str) -> tuple[str, str]:
-    """解析训练数据键，返回(accper, stock_code)"""
-    if not validate_key_format(key, TRAIN_DATA_KEY_TEMPLATE):
-        raise ValueError(f"无效的训练数据键格式: {key}")
+    def get_config(self) -> Dict[str, str]:
+        """获取当前配置"""
+        return self._config.copy()
     
-    parts = key.split(":")
-    if len(parts) >= 4:
-        return parts[2], parts[3]
-    raise ValueError(f"无法解析训练数据键: {key}")
+    def reload_config(self):
+        """重新加载配置"""
+        self._config = self._load_config()
+        logger.info("Redis前缀配置已重新加载")
 
-def parse_counter_key(key: str) -> tuple[str, str]:
-    """解析计数器键，返回(accper, stock_code)"""
-    if not validate_key_format(key, COUNTER_KEY_TEMPLATE):
-        raise ValueError(f"无效的计数器键格式: {key}")
-    
-    parts = key.split(":")
-    if len(parts) >= 5:
-        return parts[3], parts[4]
-    raise ValueError(f"无法解析计数器键: {key}")
+

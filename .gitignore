@@ -8,6 +8,7 @@ __pycache__/
 
 # 开源项目 
 opensource_program/
+base_llm/
 
 # 数据文件
 data/

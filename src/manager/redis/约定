@@ -7,7 +7,6 @@
 # gt:node_id:元数据(json)
 
 # 金融数据
-# 最小的存储单位是gt:factors:accper:code:因子表 (gt表示毕业论文项目)   
-# 收益率数据gt:return:accper:code:收益率
-# 设置counter计数器记录访问次数 counter:gt:factors:accper:code:因子列表（根据因子名称排序，只取数据）+ 收益率(最后一项)      
+# 最小的存储单位是gt:train:accper:code:因子表 + 该月收益率 (gt表示毕业论文项目)   
+# 设置counter计数器记录访问次数 counter:gt:factors:accper:code:次数      
 # 当访问次数等于node数量后，删除数据  

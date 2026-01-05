@@ -36,3 +36,17 @@ monitoring:
   max_wait_checks: 5          # 最大等待检查次数
   check_interval: 0.5          # 每次检查间隔(秒)
 
+# 消息总线配置  
+message_bus:
+  ttl: 3600
+  timeout: 5
+
+# 前缀管理
+prefix:
+  project: "gt" # 项目前缀  
+  system: 'system' # 系统消息前缀  
+  message_bus_queue: 'Q' # 消息队列前缀 
+  # eg. gt:system:Q: 具体消息json  
+  data: 'data' # 数据前缀  
+  # eg. gt:data: date:code: 具体数据  
+  

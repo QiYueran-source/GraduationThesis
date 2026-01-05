@@ -1,10 +1,26 @@
 # 超参数配置 
+# 全局超参数，所有node一样  
+# 不同过超参数提供异质性  
+
 # 训练 
 train:
   window_size: 12 # 训练窗口-12个月   
   time_step: 1 # 时间步-1个月  
+  stock_pool: test # 使用测试池
+  data_quality_threshold: 0.8 # 数据质量阈值,即需要至少80%的非空值  
+  start_date: 1997-01-01 # 开始日期
+  end_date: 2025-12-31 # 结束日期
+  
 
 # 评价指标计算  
 performance:
   risk_free_rate: 0.015 # 无风险利率  
-  standerdize_window: 12 # 标准化窗口-12个月  
+
+# redis数据冗余配置  
+redis_redundancy:
+  min_periods_adder: 2 # 冗余下限为 windows + 2 期   
+  max_periods_adder: -1 # 冗余上限为 2windows + (-1)  期   
+  clean_up_threshold: 0.85 # 清理阈值，当85%的node访问过该数据后，启动倒计时  
+  clean_up_countdown: 300 # 倒计时300秒，倒计时结束后，删除数据    
+  
+  

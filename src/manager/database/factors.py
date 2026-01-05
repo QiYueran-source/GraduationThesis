@@ -55,7 +55,7 @@ def _query_single_table(table_name: str, date_condition: str, code_condition: st
         raise DatabaseReadException(f"查询表 {table_name} 失败: {e}")
 
 # 读取因子数据库
-def read_factors_info()->pl.DataFrame:
+def get_factors_info()->pl.DataFrame:
     '''读取因子数据库'''
     query_factors_metainfo = """
         SELECT * FROM factors_data.factor_metadata
