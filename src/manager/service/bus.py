@@ -67,14 +67,18 @@ class MessageBus:
     def _dispatch_message(self, message: dict):
         """分发消息给订阅者"""
         import concurrent.futures
-        message_type = message.get('type')
+        message_type = message.get('message_type')
 
         # 分发给特定类型的订阅者
         if message_type in self.subscribers:
             for handler in self.subscribers[message_type]:
                 try:
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                        executor.submit(handler, message)
+                    thread = threading.Thread(
+                        target=handler, 
+                        args=(message,),
+                        daemon=True  # 设为守护线程，随主程序退出
+                    )
+                    thread.start()
                 except Exception as e:
                     logger.error(f"消息处理器异常: {e}")
 
@@ -155,12 +159,12 @@ class MessageBus:
             # 自动生成ID和时间戳
             with self._message_count_lock:
                 self._message_count += 1
-                msg_type = message.get('type', 'unknown')
+                msg_type = message.get('message_type', 'unknown')
                 message['id'] = f"{msg_type}_{self._message_count:06d}"
                 message['timestamp'] = time.time()
 
             # req_id自增  
-            if message.get('type') == 'load_request' or message.get('type') == 'init':
+            if message.get('message_type') == 'load_request' or message.get('message_type') == 'init':
                 with self._req_id_count_lock:
                     self._req_id_count += 1
                     message['payload']['request_id'] = f"req_{self._req_id_count:06d}"
@@ -175,7 +179,7 @@ class MessageBus:
             # 设置过期时间，避免队列积压
             self.client.expire(system_queue, self.ttl)
 
-            logger.debug(f"消息已发布: {message.get('type')}, ID: {message['id']}, Timestamp: {message['timestamp']}")
+            logger.debug(f"消息已发布: {message.get('message_type')}, ID: {message['id']}, Timestamp: {message['timestamp']}")
             return message['id'], message['timestamp']
 
         except Exception as e:

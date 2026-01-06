@@ -89,7 +89,7 @@ def get_factors_info()->pl.DataFrame:
 
 def get_factors_name()->List[str]:
     '''获取因子名称'''
-    factors_name = read_factors_info()['factor_name'].to_list()
+    factors_name = get_factors_info()['factor_name'].to_list()
     return factors_name
 
 def get_factors_data(
@@ -111,10 +111,9 @@ def get_factors_data(
         - [各种因子列]: 该表的因子值
         - table_name: 数据来源表名（用于区分不同类别因子）
     '''
-
     try:
         # 1. 获取所有因子表信息
-        factors_meta = read_factors_info()
+        factors_meta = get_factors_info()
         table_names = factors_meta['table_name'].unique().to_list()
 
         logger.info(f"开始获取因子数据，共 {len(table_names)} 个因子表")

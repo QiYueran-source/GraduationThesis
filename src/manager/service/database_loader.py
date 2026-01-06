@@ -83,8 +83,7 @@ class DatabaseLoader:
         根据start_date和max_periods，查询数据库，获取初始数据，以polars.DataFrame形式保存redis
         然后发布InitDataLoadedMessage，payload: DataLoadedPayload
         """
-        print(f"处理初始化请求: {message}")  
-        req_id = message['payload']['req_id'] # "获取req_id"
+        req_id = message['payload']['request_id'] # "获取req_id"
 
         try:
             # 获取Redis客户端
@@ -109,7 +108,7 @@ class DatabaseLoader:
             MESSAGE_BUS.publish(InitDataLoadedMessage(
                 publisher='database_loader',
                 payload=InitDataLoadedPayload(
-                    req_id=req_id
+                    request_id=req_id
                 )
             ))
             logger.info(f"初始化数据加载完成: {req_id}")
@@ -126,4 +125,3 @@ class DatabaseLoader:
 
 # 全局数据库加载器  
 DATABASE_LOADER = DatabaseLoader()
-

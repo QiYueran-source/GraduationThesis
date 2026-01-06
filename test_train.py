@@ -15,7 +15,7 @@ from src.manager.service import MESSAGE_BUS, InitMessage, InitMessagePayload
 MESSAGE_BUS.start()
 MESSAGE_BUS.publish(
     InitMessage(
-        type='init', 
+        message_type='init', 
         payload = InitMessagePayload(
             
         )
@@ -23,5 +23,5 @@ MESSAGE_BUS.publish(
 )
 
 import time
-time.sleep(10)
+time.sleep(120)
 MESSAGE_BUS.stop()
