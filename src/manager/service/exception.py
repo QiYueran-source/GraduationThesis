@@ -4,3 +4,6 @@ class ServiceException(Exception):
 
 class ServiceConfigurationException(ServiceException):
     '''服务配置异常'''  
+
+class ServiceInitException(ServiceException):
+    '''服务初始化异常'''  

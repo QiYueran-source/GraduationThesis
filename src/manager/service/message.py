@@ -5,27 +5,32 @@ from typing import TypedDict, List, Dict, Any, Optional, Literal, Union
 # =============================================================================
 class InitMessagePayload(TypedDict):
     """初始化消息payload
-    request_id: str       # "req_001"
+    request_id: str       # "req_001" 自动生成
     """
-    request_id: str       # "req_001"
+    pass 
+
+class InitDataLoadedPayload(TypedDict):
+    """初始化数据加载完成payload
+    request_id: str       # "req_001" 自动生成
+    """
+    req_id: str       # "req_001" 获取
 
 class LoadRequestPayload(TypedDict):
     """数据加载请求payload  
     year_list: List[str]  # ["2023", "2024"]
     stock_pool: str       # "test" | "hs300" | "zz500"
-    request_id: str       # "req_001"
+    request_id: str       # "req_001" 自动生成
     """
     year_list: List[str]  # ["2023", "2024"]
     stock_pool: str       # "test" | "hs300" | "zz500"
-    request_id: str       # "req_001"
+    
 
 class DataLoadedPayload(TypedDict):
     """数据加载完成payload
-    request_id: str       # "req_001"
+    request_id: str       # "req_001" 自动生成
     data_keys: Dict[str, str]  # {"factors": "gt:data:temp:req_001:factors", "returns": "..."}
     metadata: Dict[str, Any]   # {"stock_count": 1000, "period_count": 12}
     """
-    request_id: str
     data_keys: Dict[str, str]  # {"factors": "gt:data:temp:req_001:factors", "returns": "..."}
     metadata: Dict[str, Any]   # {"stock_count": 1000, "period_count": 12}
 
@@ -62,6 +67,11 @@ class InitMessage(TypedDict):
     message_type: Literal['init']
     publisher: str
     payload: InitMessagePayload
+
+class InitDataLoadedMessage(TypedDict):
+    message_type: Literal['init_data_loaded']
+    publisher: str
+    payload: InitDataLoadedPayload
 
 class LoadRequestMessage(TypedDict):
     message_type: Literal['load_request']
@@ -100,6 +110,7 @@ class ShutdownMessage(TypedDict):
 Message = Union[
     InitMessage,
     LoadRequestMessage,
+    InitDataLoadedMessage,
     DataLoadedMessage,
     TrainDataUpdatedMessage,
     NodeHealthCheckMessage,
@@ -110,6 +121,7 @@ Message = Union[
 MessageType = Literal[
     'init',
     'load_request',
+    'init_data_loaded',
     'data_loaded',
     'train_data_updated',
     'node_health_check',

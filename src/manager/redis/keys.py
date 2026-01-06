@@ -13,89 +13,99 @@ logger = get_module_logger(__name__, prefix='[RedisKeys]')
 
 
 class RedisPrefixManager:
-    """简化的Redis前缀管理器"""
-    
-    def __init__(self, config_path: str = "src/config/redis.yaml"):
-        self.config_path = config_path
-        self._config = self._load_config()
-    
-    def _load_config(self) -> Dict[str, str]:
-        """从YAML配置加载前缀"""
-        try:
-            with open(self.config_path, 'r', encoding='utf-8') as f:
-                config = yaml.safe_load(f)
-            
-            prefix_config = config.get('prefix', {})
-            
-            # 默认配置，如果YAML中没有指定
-            defaults = {
-                'project': 'default_project',
-                'system': 'system',
-                'message_bus_queue': 'default_message_bus_queue',
-                'data_tag': 'default_data_tag',
-            }
-            
-            # 合并配置
-            merged_config = {**defaults, **prefix_config}
-            logger.info(f"Redis前缀配置已加载: {merged_config}")
-            
-            return merged_config
-            
-        except Exception as e:
-            logger.warning(f"无法加载前缀配置，使用默认值: {e}")
-            return {
-                'project': 'default_project',
-                'system': 'system',
-                'message_bus_queue': 'default_message_bus_queue',
-                'data_tag': 'default_data_tag',
-            }
-    
+
+    def __init__(self):
+        """简化的Redis前缀管理器
+        - 项目根前缀: gt project_prefix     
+            - 系统前缀: gt:system system_prefix   
+                - 消息队列键: gt:system:Q message_bus_queue_key   
+            - 数据前缀: gt:data   
+                - 初始化前缀: gt:data:init:  
+                    - 初始因子数据键：gt:data:init:factors_df_key  
+                    - 初始收益率数据键：gt:data:init:return_df_key    
+                - 加载数据前缀: gt:data:load:
+                    - 因子数据键：gt:data:load:{{year}}:factors_df_key  
+                    - 收益率数据键：gt:data:load:{{year}}:return_df_key  
+                - 训练数据前缀: gt:data:train: 
+                    - 因子数据键：gt:data:train:{{year}}:{{month}}:{{code}}:factors_df_key  
+                    - 收益率数据键：gt:data:train:{{year}}:{{month}}:{{code}}:return_df_key  
+        """
+        # 定义前缀 
+        self._project_prefix = 'gt'
+        self._system_prefix = 'system'
+        self._data_prefix = 'data'
+        self._init_data_prefix = 'init'
+        self._load_data_prefix = 'load'
+        self._train_data_prefix = 'train'
+
+        # 定义键
+        self.message_bus_queue_key = 'Q'
+    # ========================================================
+    # 前缀
+    # ========================================================
     @property
     def project_prefix(self) -> str:
-        """获取项目前缀"""
-        return self._config['project']
+        """获取项目前缀,例如: gt"""
+        return self._project_prefix
     
     @property
     def system_prefix(self) -> str:
         """
         例如: gt:system 
         """
-        return ":".join([self.project_prefix, self._config['system']])
+        return ":".join([self._project_prefix, self._system_prefix])
     
     @property
     def data_prefix(self) -> str:
         """
         例如: gt:data: 具体数据  
         """
-        return ":".join([self.project_prefix, self._config['data']])
+        return ":".join([self._project_prefix, self._data_prefix])
     
     @property
-    def message_bus_queue_key(self) -> str:
+    def init_prefix(self) -> str:
         """
+        例如: gt:data:init
+        """
+        return ":".join([self._data_prefix, self._init_data_prefix])
+    
+    @property
+    def load_prefix(self) -> str:
+        """
+        例如: gt:data:load
+        """
+        return ":".join([self._data_prefix, self._load_data_prefix])
+    
+    @property
+    def train_prefix(self) -> str:
+        """
+        例如: gt:data:train
+        """
+        return ":".join([self._data_prefix, self._train_data_prefix])
+
+    # ========================================================
+    # 构建键
+    # ========================================================
+    ## 消息队列键
+    def build_message_bus_queue_key(self) -> str:
+        """
+        构建消息队列键
         例如: gt:system:Q
         """
-        return ":".join([self.system_prefix, self._config['message_bus_queue']])
+        return ":".join([self.system_prefix, self.message_bus_queue_key])
     
-    def build_train_data_key(
-        self,
-        year: int,
-        month: int,
-        code: str,
-    ):
+    ##.init键
+    def build_init_factors_df_key(self, year: int) -> str:
         """
-        构建训练数据键
-        例如: gt:data: date:code: 具体数据  
-        code形如000001
+        构建初始因子数据键
+        例如: gt:data:init:{{year}}:factors_df_key
         """
-        return ":".join([self.data_prefix, f"{year}{month:02d}", code])
-
-    def get_config(self) -> Dict[str, str]:
-        """获取当前配置"""
-        return self._config.copy()
+        return ":".join([self.init_prefix, f"{year}", 'factors_df_key'])
     
-    def reload_config(self):
-        """重新加载配置"""
-        self._config = self._load_config()
-        logger.info("Redis前缀配置已重新加载")
-
-
+    def build_init_return_df_key(self, year: int) -> str:
+        """
+        构建初始收益率数据键
+        例如: gt:data:init:{{year}}:return_df_key
+        """
+        return ":".join([self.init_prefix, f"{year}", 'return_df_key'])
+    

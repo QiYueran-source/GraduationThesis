@@ -31,7 +31,10 @@ class MessageBus:
         self.subscribers = {}
         self._running = False
         self._subscriber_thread = None
+        self._message_count_lock = threading.Lock() # 消息计数器锁  
         self._message_count = 0  # 消息计数器
+        self._req_id_count_lock = threading.Lock() # req_id计数器锁  
+        self._req_id_count = 0  # req_id计数器
         self._config = {}
 
         self._load_config()
@@ -150,10 +153,17 @@ class MessageBus:
         """发布消息到队列，自动生成ID"""
         try:
             # 自动生成ID和时间戳
-            self._message_count += 1
-            msg_type = message.get('type', 'unknown')
-            message['id'] = f"{msg_type}_{self._message_count:06d}"
-            message['timestamp'] = time.time()
+            with self._message_count_lock:
+                self._message_count += 1
+                msg_type = message.get('type', 'unknown')
+                message['id'] = f"{msg_type}_{self._message_count:06d}"
+                message['timestamp'] = time.time()
+
+            # req_id自增  
+            if message.get('type') == 'load_request' or message.get('type') == 'init':
+                with self._req_id_count_lock:
+                    self._req_id_count += 1
+                    message['payload']['request_id'] = f"req_{self._req_id_count:06d}"
 
             # 序列化并发布
             message_json = json.dumps(message)

@@ -10,21 +10,18 @@ client = REDIS_CONNECTOR.get_client()
 REDIS_MONITOR.start()
 
 from src.manager.service import DATABASE_LOADER
-from src.manager.service import MESSAGE_BUS, InitMessage
-print(MESSAGE_BUS.subscribers)
+from src.manager.service import MESSAGE_BUS, InitMessage, InitMessagePayload
+
 MESSAGE_BUS.start()
 MESSAGE_BUS.publish(
     InitMessage(
         type='init', 
-        payload={'year_list': ['2023', '2024'], 'stock_pool': 'test'}
+        payload = InitMessagePayload(
+            
         )
     )
-MESSAGE_BUS.publish(
-    InitMessage(
-        type='init', 
-        payload={'year_list': ['2023', '2024'], 'stock_pool': 'test'}
-        )
-    )
+)
 
-
+import time
+time.sleep(10)
 MESSAGE_BUS.stop()
