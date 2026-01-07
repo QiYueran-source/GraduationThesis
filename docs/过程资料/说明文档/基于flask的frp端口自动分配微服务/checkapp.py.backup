@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+端口池管理系统
+维护可用端口队列和已分配端口集合，支持端口的动态分配和释放
+"""
+
+import socket
+from flask import Flask, jsonify
+
+app = Flask(__name__)
+
+# 配置
+PORT_RANGE_START = 8191  # 端口范围：8191-8220
+PORT_RANGE_END = 8220
+
+# 端口池数据结构
+available_ports = []  # 可用端口队列（FIFO）
+allocated_ports = set()  # 已分配端口集合
+
+def initialize_ports():
+    """初始化端口池"""
+    global available_ports, allocated_ports
+    available_ports = list(range(PORT_RANGE_START, PORT_RANGE_END + 1))
+    allocated_ports = set()
+    print(f"端口池初始化完成: {len(available_ports)} 个可用端口")
+
+def is_port_available(port):
+    """检查端口是否可用"""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            result = s.connect_ex(('127.0.0.1', port))
+            return result != 0  # 0表示连接成功（端口被占用），非0表示可用
+    except Exception as e:
+        print(f"检查端口 {port} 时出错: {e}")
+        return False
+
+# 初始化端口池
+initialize_ports()
+
+@app.route('/register', methods=['GET'])
+def register():
+    """分配端口 - 从可用端口队列弹出端口"""
+    global available_ports, allocated_ports
+
+    # 如果可用端口队列为空，尝试重新填充（去除已被系统占用的端口）
+    if not available_ports:
+        print("可用端口队列为空，尝试重新填充...")
+        available_ports = [port for port in range(PORT_RANGE_START, PORT_RANGE_END + 1)
+                          if port not in allocated_ports and is_port_available(port)]
+
+        if not available_ports:
+            return jsonify({
+                'error': '没有可用端口',
+                'status': 'no_port'
+            }), 503
+
+    # 从队列头部弹出端口
+    allocated_port = available_ports.pop(0)
+    allocated_ports.add(allocated_port)
+
+    print(f"端口 {allocated_port} 已分配，可用端口剩余: {len(available_ports)}")
+
+    return jsonify({
+        'status': 'success',
+        'allocated_port': allocated_port,
+        'available_count': len(available_ports),
+        'allocated_count': len(allocated_ports)
+    })
+
+@app.route('/release/<int:port>', methods=['DELETE'])
+def release(port):
+    """释放指定端口 - 将端口从已分配移到可用队列"""
+    global available_ports, allocated_ports
+
+    if port not in allocated_ports:
+        return jsonify({
+            'error': f'端口 {port} 未被分配',
+            'status': 'not_allocated'
+        }), 404
+
+    # 从已分配集合中移除
+    allocated_ports.remove(port)
+    # 添加到可用端口队列末尾
+    available_ports.append(port)
+
+    print(f"端口 {port} 已释放，可用端口: {len(available_ports)}，已分配: {len(allocated_ports)}")
+
+    return jsonify({
+        'status': 'released',
+        'released_port': port,
+        'available_count': len(available_ports),
+        'allocated_count': len(allocated_ports)
+    })
+
+@app.route('/clear', methods=['DELETE'])
+def clear():
+    """清空所有已分配端口 - 全部移回可用队列"""
+    global available_ports, allocated_ports
+
+    released_count = len(allocated_ports)
+
+    # 将所有已分配端口移到可用队列
+    available_ports.extend(allocated_ports)
+    allocated_ports.clear()
+
+    print(f"清空完成: {released_count} 个端口已释放回可用队列")
+
+    return jsonify({
+        'status': 'cleared',
+        'released_count': released_count,
+        'available_count': len(available_ports),
+        'allocated_count': len(allocated_ports)
+    })
+
+@app.route('/status', methods=['GET'])
+def status():
+    """查看端口状态"""
+    global available_ports, allocated_ports
+
+    return jsonify({
+        'available_count': len(available_ports),
+        'allocated_count': len(allocated_ports),
+        'available_ports': available_ports[:10],  # 只显示前10个
+        'allocated_ports': sorted(list(allocated_ports)),
+        'port_range': f'{PORT_RANGE_START}-{PORT_RANGE_END}',
+        'total_ports': PORT_RANGE_END - PORT_RANGE_START + 1
+    })
+
+@app.route('/health', methods=['GET'])
+def health():
+    """健康检查"""
+    global available_ports, allocated_ports
+
+    return jsonify({
+        'status': 'ok',
+        'service': 'port-pool-manager',
+        'port': 8190,
+        'port_range': f'{PORT_RANGE_START}-{PORT_RANGE_END}',
+        'available_count': len(available_ports),
+        'allocated_count': len(allocated_ports)
+    })
+
+if __name__ == '__main__':
+    print("=" * 60)
+    print("端口池管理系统启动")
+    print("设计理念: 维护可用端口队列，支持端口动态分配和释放")
+    print(f"端口范围: {PORT_RANGE_START}-{PORT_RANGE_END}")
+    print("")
+    print("API接口:")
+    print("  GET /register - 分配端口（从队列弹出）")
+    print("  DELETE /release/<port> - 释放指定端口")
+    print("  DELETE /clear - 清空所有已分配端口")
+    print("  GET /status - 查看端口状态")
+    print("  GET /health - 健康检查")
+    print("=" * 60)
+    app.run(host='0.0.0.0', port=8190, threaded=True)
