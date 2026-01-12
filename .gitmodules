@@ -1,3 +1,6 @@
 [submodule "Node"]
 	path = Node
 	url = git@github.com:QiYueran-source/NodeForGraduationThesis.git
+[submodule "docs/thesis_template"]
+	path = docs/thesis_template
+	url = git@github.com:AaronComo/WHU-Bachelor-Thesis-Template.git
