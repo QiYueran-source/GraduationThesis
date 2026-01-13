@@ -3,7 +3,8 @@
 """
 # 库
 import datetime as dt
-import pickle
+import json
+import polars as pl
 
 # 组件
 from src.manager.database import get_code_list, get_factors_data, get_factors_info, get_stock_return
@@ -47,18 +48,18 @@ class DatabaseLoader:
             factors_end_date = dt.date(each_year,12,31)
             return_start_date = dt.date(each_year,2,1)
             return_end_date = dt.date(each_year+1,1,31)
-            factors_df = get_factors_data(code_list,factors_start_date,factors_end_date)
-            return_df = get_stock_return(code_list,return_start_date,return_end_date)
-
+            factors_df = get_factors_data(code_list,factors_start_date,factors_end_date).with_columns(pl.col('accper').dt.strftime('%Y-%m-%d').alias('accper'))
+            return_df = get_stock_return(code_list,return_start_date,return_end_date).with_columns(pl.col('accper').dt.strftime('%Y-%m-%d').alias('accper'))
+    
             # 保存数据 
             self.client.set(
                 name = REDIS_PREFIX_MANAGER.build_df_key(each_year,'factors_df'),
-                value = pickle.dumps(factors_df.to_dicts()),
+                value = json.dumps(factors_df.to_dicts()),
                 ex=7200
             )
             self.client.set(
                 name = REDIS_PREFIX_MANAGER.build_df_key(each_year,'return_df'),
-                value = pickle.dumps(return_df.to_dicts()),
+                value = json.dumps(return_df.to_dicts()),
                 ex=7200
             )  
             logger.info(f"处理数据加载请求: 加载{message['payload']['request_id']}的{each_year}年数据")

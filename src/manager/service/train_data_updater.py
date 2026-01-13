@@ -9,7 +9,7 @@
 import polars as pl
 import redis 
 import yaml
-import pickle
+import json
 from threading import Lock
 
 # 组件
@@ -53,17 +53,30 @@ class TrainDataUpdater:
         with self.lock:
             # 1.加载df  
             year = message['payload']['year']
-            factors_df = pickle.loads(self.client.get(REDIS_PREFIX_MANAGER.build_df_key(year,'factors_df')))
-            return_df = pickle.loads(self.client.get(REDIS_PREFIX_MANAGER.build_df_key(year,'return_df')))
+            factors_df_dicts = json.loads(self.client.get(REDIS_PREFIX_MANAGER.build_df_key(year,'factors_df')))
+            return_df_dicts = json.loads(self.client.get(REDIS_PREFIX_MANAGER.build_df_key(year,'return_df')))
+            factors_df = pl.DataFrame(factors_df_dicts).with_columns(pl.col('accper').str.strptime(pl.Date,format='%Y-%m-%d').alias('accper'))
+            return_df = pl.DataFrame(return_df_dicts).with_columns(pl.col('accper').str.strptime(pl.Date,format='%Y-%m-%d').alias('accper'))
             self.now_year = year
 
-            # 2.因子标准化  
-            std_factors_df = factors_df.group_by('stkcd').agg(
-                [
-                    pl.col(factor).std().alias(factor)
-                    for factor in factors_df.columns if factor != 'stkcd' or factor != 'accper'
-                ]
-            )
+            print(factors_df.sort('accper').head())
+
+            # 2.因子标准化（按 stkcd 分组，对每个因子进行 z-score 标准化）
+            # 标准化公式: (x - mean) / std
+            # 需要保留所有行和列，只标准化因子列
+            
+            # 获取需要标准化的因子列（排除 stkcd 和 accper）
+            factor_cols = sorted([col for col in factors_df.columns 
+                          if col != 'stkcd' and col != 'accper'])
+
+            
+            # 按 stkcd 分组，对每个因子列进行标准化
+            # 使用 over() 窗口函数，保留所有行
+            std_factors_df = factors_df.with_columns([
+                ((pl.col(factor) - pl.col(factor).mean().over('accper')) / 
+                 pl.col(factor).std().over('accper')).alias(factor)
+                for factor in factor_cols
+            ])
 
             # 3.连接因子和收益率（收益率的日期滞后一月）    
             return_df = return_df.with_columns(
@@ -74,25 +87,32 @@ class TrainDataUpdater:
             # 4.纵向合并df，进行填充（如果latest_df不存在，则使用向前-向后-补0三步骤填充）
             if self.latest_df is None:
                 clean_df = merged_df.fill_null(strategy='forward').fill_null(strategy='backward').fill_null(value=0)
+                clean_df = clean_df.select(['stkcd','accper',*factor_cols,'monthly_return'])
             else:
-                clean_df = merged_df.vstack(self.latest_df).fill_null(strategy='forward').filter(pl.col('accper').dt.year() == self.now_year)
+                merged_df = merged_df.select(['stkcd','accper',*factor_cols,'monthly_return'])
+                clean_df = merged_df.vstack(self.latest_df).fill_null(strategy='forward').filter(pl.col('accper').dt.year() == self.now_year).select(['stkcd','accper',*factor_cols,'monthly_return'])
+
             self.latest_df = clean_df
 
             # 5.将数据处理为数据片  
             for row in clean_df.to_dicts():
                 code = row.pop('stkcd')
                 accper = row.pop('accper')
-                year,month = accper.year(),accper.month()
+                year,month = accper.year,accper.month
                 monthly_return = row.pop('monthly_return')
-                sorted_factors = list(sorted(row.items(), key=lambda x: x[0]).values()) # 按首字母排序
+                sorted_factors = [v for k,v in sorted(row.items())] # 按首字母排序
             
                 # 构建数据片键
                 train_slice_key = REDIS_PREFIX_MANAGER.build_train_slice_key(year,month,code)
                 self.client.set(
                     name = train_slice_key,
-                    value = pickle.dumps([sorted_factors,monthly_return]),
+                    value = json.dumps([sorted_factors,monthly_return]),
                     ex=7200
                 )
+
+            # 6.移除当前year的df
+            self.client.delete(REDIS_PREFIX_MANAGER.build_df_key(self.now_year,'factors_df'))
+            self.client.delete(REDIS_PREFIX_MANAGER.build_df_key(self.now_year,'return_df'))
             
 
     def _subscribe(self):
