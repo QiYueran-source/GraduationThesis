@@ -4,6 +4,7 @@ import datetime as dt
 
 from src.manager.redis import REDIS_CONNECTOR, REDIS_MONITOR
 from src.manager.service import DATA_REDUNDANCY_MONITOR
+from src.manager.service import TRAIN_DATA_UPDATER
 
 client = REDIS_CONNECTOR.get_client()
 

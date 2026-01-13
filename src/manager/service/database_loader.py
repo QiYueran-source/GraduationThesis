@@ -11,7 +11,7 @@ from src.manager.redis import REDIS_CONNECTOR, REDIS_PREFIX_MANAGER
 from src.manager.service.bus import MESSAGE_BUS
 from src.manager.service.message import (
     Message,
-    InitMessagePayload,
+    DataLoadedMessage,DataLoadedPayload
 )
 
 # 日志
@@ -62,6 +62,21 @@ class DatabaseLoader:
                 ex=7200
             )  
             logger.info(f"处理数据加载请求: 加载{message['payload']['request_id']}的{each_year}年数据")
+
+            # 发布数据加载完成事件
+            payload = DataLoadedPayload(
+                request_id=message['payload']['request_id'],
+                year=each_year
+            )
+            data_loaded_message = DataLoadedMessage(
+                message_type='data_loaded',
+                publisher='DatabaseLoader',
+                payload=payload
+            )
+            MESSAGE_BUS.publish(
+                message = data_loaded_message
+            )
+            logger.info(f"发布数据加载完成事件: {payload}")
     
 
     def _subscribe_handlers(self):

@@ -20,12 +20,11 @@ class LoadRequestPayload(TypedDict):
 
 class DataLoadedPayload(TypedDict):
     """数据加载完成payload
-    request_id: str       # "req_001" 自动生成
-    data_keys: Dict[str, str]  # {"factors": "gt:data:temp:req_001:factors", "returns": "..."}
-    metadata: Dict[str, Any]   # {"stock_count": 1000, "period_count": 12}
+    request_id: int       # 1 相应loadrequest的id
+    year:int             # 2024 一次只提供一个年份
     """
-    data_keys: Dict[str, str]  # {"factors": "gt:data:temp:req_001:factors", "returns": "..."}
-    metadata: Dict[str, Any]   # {"stock_count": 1000, "period_count": 12}
+    request_id: int       # 1 相应loadrequest的id
+    year:int             # 2024 
 
 class TrainDataUpdatedPayload(TypedDict):
     """训练数据更新payload"""
