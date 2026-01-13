@@ -5,7 +5,7 @@ Redis键管理和前缀配置
 """
 
 import yaml
-from typing import Final, Dict, Optional\
+from typing import Final, Dict, Optional,Literal
 
 # 日志
 from src.utils.logger import get_module_logger
@@ -15,20 +15,15 @@ logger = get_module_logger(__name__, prefix='[RedisKeys]')
 class RedisPrefixManager:
 
     def __init__(self):
-        """简化的Redis前缀管理器
+        f"""简化的Redis前缀管理器
         - 项目根前缀: gt project_prefix     
             - 系统前缀: gt:system system_prefix   
                 - 消息队列键: gt:system:Q message_bus_queue_key   
             - 数据前缀: gt:data   
-                - 初始化前缀: gt:data:init:  
-                    - 初始因子数据键：gt:data:init:factors_df_key  
-                    - 初始收益率数据键：gt:data:init:return_df_key    
-                - 加载数据前缀: gt:data:load:
-                    - 因子数据键：gt:data:load:{{year}}:factors_df_key  
-                    - 收益率数据键：gt:data:load:{{year}}:return_df_key  
-                - 训练数据前缀: gt:data:train: 
-                    - 因子数据键：gt:data:train:{{year}}:{{month}}:{{code}}:factors_df_key  
-                    - 收益率数据键：gt:data:train:{{year}}:{{month}}:{{code}}:return_df_key  
+                - raw数据框df前缀: gt:data:df:{{year}}
+                    - 因子df：gt:data:df:{{year}}:factors_df   
+                    - 收益率df：gt:data:df:{{year}}:return_df
+                - 训练数据片前缀: gt:data:train:{{year}}:{{month}}:{{code}}   
         """
         # 定义前缀 
         self._project_prefix = 'gt'
@@ -37,6 +32,7 @@ class RedisPrefixManager:
         self._init_data_prefix = 'init'
         self._load_data_prefix = 'load'
         self._train_data_prefix = 'train'
+        self._df_prefix = 'df'
 
         # 定义键
         self.message_bus_queue_key = 'Q'
@@ -63,25 +59,18 @@ class RedisPrefixManager:
         return ":".join([self._project_prefix, self._data_prefix])
     
     @property
-    def init_prefix(self) -> str:
-        """
-        例如: gt:data:init
-        """
-        return ":".join([self._data_prefix, self._init_data_prefix])
-    
-    @property
-    def load_prefix(self) -> str:
-        """
-        例如: gt:data:load
-        """
-        return ":".join([self._data_prefix, self._load_data_prefix])
-    
-    @property
     def train_prefix(self) -> str:
         """
         例如: gt:data:train
         """
-        return ":".join([self._data_prefix, self._train_data_prefix])
+        return ":".join([self.data_prefix, self._train_data_prefix])
+
+    @property
+    def df_prefix(self) -> str:
+        """
+        例如: gt:data:df
+        """
+        return ":".join([self.data_prefix, self._df_prefix])
 
     # ========================================================
     # 构建键
@@ -93,19 +82,41 @@ class RedisPrefixManager:
         例如: gt:system:Q
         """
         return ":".join([self.system_prefix, self.message_bus_queue_key])
+
+    ## 构建数据框键
+    def build_df_key(self, 
+        year: int, 
+        key_type:Literal['factors_df','return_df']
+    ) -> str:
+        """
+        构建因子df键
+        例如: gt:data:df:2024:factors_df
+        """
+        return ":".join([self.df_prefix, str(year), key_type])
     
-    ##.init键
-    def build_init_factors_df_key(self, year: int) -> str:
+    ## 构建数据片键
+    def build_train_slice_key(
+        self, 
+        year: int, 
+        month: int, 
+        code: str, 
+    ) -> str:
         """
-        构建初始因子数据键
-        例如: gt:data:init:{{year}}:factors_df_key
+        构建训练数据片键
+        
+        Args:
+            year: 年份
+            month: 月份 (1-12)
+            code: 证券代码
+        
+        例如: 
+            gt:data:train:2024:01:000001
+        
+        数据片的形式：列表 [因子(按首字母排序)，收益率]
         """
-        return ":".join([self.init_prefix, f"{year}", 'factors_df_key'])
+        month_str = f"{month:02d}"  # 格式化为两位数，如 01, 02
+        return ":".join([self.train_prefix, str(year), month_str, code])
     
-    def build_init_return_df_key(self, year: int) -> str:
-        """
-        构建初始收益率数据键
-        例如: gt:data:init:{{year}}:return_df_key
-        """
-        return ":".join([self.init_prefix, f"{year}", 'return_df_key'])
-    
+
+
+

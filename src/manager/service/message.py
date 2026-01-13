@@ -4,25 +4,18 @@ from typing import TypedDict, List, Dict, Any, Optional, Literal, Union
 # Payload类型定义
 # =============================================================================
 class InitMessagePayload(TypedDict):
-    """初始化消息payload
-    request_id: str       # "req_001" 自动生成
-    """
+    """初始化消息"""
     pass 
-
-class InitDataLoadedPayload(TypedDict):
-    """初始化数据加载完成payload
-    request_id: str       # "req_001" 自动生成
-    """
-    req_id: str       # "req_001" 获取
 
 class LoadRequestPayload(TypedDict):
     """数据加载请求payload  
-    year_list: List[str]  # ["2023", "2024"]
+    year_list: List[str]  # [2023, 2024]
     stock_pool: str       # "test" | "hs300" | "zz500"
-    request_id: str       # "req_001" 自动生成
+    request_id: int       # 1 
     """
-    year_list: List[str]  # ["2023", "2024"]
+    year_list: List[int]  # [2023, 2024]
     stock_pool: str       # "test" | "hs300" | "zz500"
+    request_id: int # 1
     
 
 class DataLoadedPayload(TypedDict):
@@ -68,12 +61,8 @@ class InitMessage(TypedDict):
     publisher: str
     payload: InitMessagePayload
 
-class InitDataLoadedMessage(TypedDict):
-    message_type: Literal['init_data_loaded']
-    publisher: str
-    payload: InitDataLoadedPayload
-
 class LoadRequestMessage(TypedDict):
+    """请求加载df"""
     message_type: Literal['load_request']
     publisher: str
     payload: LoadRequestPayload

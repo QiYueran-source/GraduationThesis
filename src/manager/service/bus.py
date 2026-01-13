@@ -63,7 +63,6 @@ class MessageBus:
         self.subscribers[message_type].append(handler)
         logger.debug(f"已订阅消息类型: {message_type} -> {handler.__name__}")
 
-
     def _dispatch_message(self, message: dict):
         """分发消息给订阅者"""
         import concurrent.futures
@@ -162,13 +161,7 @@ class MessageBus:
                 msg_type = message.get('message_type', 'unknown')
                 message['id'] = f"{msg_type}_{self._message_count:06d}"
                 message['timestamp'] = time.time()
-
-            # req_id自增  
-            if message.get('message_type') == 'load_request' or message.get('message_type') == 'init':
-                with self._req_id_count_lock:
-                    self._req_id_count += 1
-                    message['payload']['request_id'] = f"req_{self._req_id_count:06d}"
-
+                
             # 序列化并发布
             message_json = json.dumps(message)
             system_queue = self.system_queue_tag
