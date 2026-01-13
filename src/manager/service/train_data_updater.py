@@ -1,7 +1,9 @@
 """
-数据库读取线程  
-1.读取数据库  
-2.通过消息队列传递数据  
+更新器  
+1.有新的df加载后，转换为数据片，加载到redis
+    - 数据标准化  
+    - 数据补全  
+2.保证redis中只有max_period期df，用于数据补全
 """
 # 库
 import polars as pl
@@ -18,3 +20,8 @@ logger = get_module_logger(__name__, prefix='[TrainDataUpdater]')
 # 训练数据更新器  
 class TrainDataUpdater:
     pass 
+
+    def __init__(self):
+        pass 
+
+    #

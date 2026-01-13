@@ -3,6 +3,7 @@ import src.manager.database.factors
 import datetime as dt
 
 from src.manager.redis import REDIS_CONNECTOR, REDIS_MONITOR
+from src.manager.service import DATA_REDUNDANCY_MONITOR
 
 client = REDIS_CONNECTOR.get_client()
 

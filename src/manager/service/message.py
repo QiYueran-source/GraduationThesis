@@ -99,7 +99,6 @@ class ShutdownMessage(TypedDict):
 Message = Union[
     InitMessage,
     LoadRequestMessage,
-    InitDataLoadedMessage,
     DataLoadedMessage,
     TrainDataUpdatedMessage,
     NodeHealthCheckMessage,

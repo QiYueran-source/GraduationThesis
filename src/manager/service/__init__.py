@@ -2,6 +2,7 @@
 训练服务，用于管理训练的上下文  
 """
 from .database_loader import DATABASE_LOADER
+from .data_monitor import DATA_REDUNDANCY_MONITOR
 from .bus import MESSAGE_BUS
 from .message import (
     Message,
@@ -17,8 +18,6 @@ from .message import (
 
 from .message import (
     InitMessagePayload,
-    InitDataLoadedPayload,
-    InitDataLoadedMessage,
     LoadRequestMessage,
     DataLoadedMessage,
     TrainDataUpdatedMessage,

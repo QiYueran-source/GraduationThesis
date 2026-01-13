@@ -22,6 +22,7 @@ redis_redundancy:
   min_periods_year: 1 # 冗余下限为 1年   
   max_periods_year: 2 # 冗余上限为 2年   
   clean_up_threshold: 0.85 # 清理阈值，当85%的node访问过该数据后，启动倒计时  
-  clean_up_countdown: 300 # 倒计时300秒，倒计时结束后，删除数据    
+  clean_up_countdown: 300 # 倒计时300秒，倒计时结束后，删除数据   
+  df_cache_period: 2 # redis中最多保存2个df，超过则删除最早的df  
   
   

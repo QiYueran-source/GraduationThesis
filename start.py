@@ -17,3 +17,14 @@
 7.监控agent训练进度，并且收集agent每轮训练的结果，如决策值、决策收益、奖励等信息  
 8.训练结束，保存数据到本地，收尾    
 """
+import polars as pl
+x = pl.DataFrame(
+    {
+        'a':[1,2,3],'b':[2,3,4]
+    }
+)
+print(x.to_dicts())
+
+
+import json 
+print(json.dumps(x.to_dicts()))

@@ -4,9 +4,8 @@ redis数据监控器
 2.数据是否过期 exp_monitor  
 """
 # 库
-from os import wait
-from re import M, T
-from typing import Any
+import threading
+from typing import Any,Optional
 import time
 import yaml
 
@@ -45,7 +44,12 @@ class DataRedundancyMonitor:
         self._redundancy_param = {}
 
         # 加载配置 
-        self._load_config()
+        self._load_config() 
+        self._monitor_thread: Optional[threading.Thread] = None
+        self._lock = threading.Lock()  # 保护共享状
+
+        # 线程管理 
+
 
         # 初始化now_year
         self.now_year = self._train_param.get('start_year',1997)
@@ -76,9 +80,23 @@ class DataRedundancyMonitor:
             raise 
 
     def start(self):
-        '''启动监控器循环'''
-        if self.started:
-            logger.info('data_monitor已经启动') 
+        """启动监控器循环"""
+        with self._lock:
+            if self.started:
+                logger.warning('数据冗余监控器已经启动')
+                return
+            
+            # 设置启动标志
+            self.started = True
+            
+            # 启动监控线程
+            self._monitor_thread = threading.Thread(
+                target=self._monitor_loop,
+                name="DataRedundancyMonitor",
+                daemon=True  # 设为守护线程，随主程序退出
+            )
+            self._monitor_thread.start()
+            logger.info('数据冗余监控器已启动')
 
     def _count_slice_year(self) -> int:
         """监控redis中有多少年的数据片
@@ -174,6 +192,42 @@ class DataRedundancyMonitor:
             while self.waiting_for_update:
                 time.sleep(wait_interval)
 
+    def stop(self, timeout: float = 10.0) -> bool:
+        """停止监控器
+        
+        Args:
+            timeout: 等待线程结束的超时时间（秒）
+            
+        Returns:
+            bool: 是否成功停止
+        """
+        with self._lock:
+            if not self.started:
+                logger.warning('数据冗余监控器未启动')
+                return True
+            
+            # 设置停止标志
+            self.started = False
+            self.waiting_for_update = False  # 取消等待状态
+        
+        # 等待监控线程结束
+        if self._monitor_thread and self._monitor_thread.is_alive():
+            logger.info(f'等待监控线程结束（超时: {timeout}秒）...')
+            self._monitor_thread.join(timeout=timeout)
+            
+            if self._monitor_thread.is_alive():
+                logger.warning(f'监控线程未能在{timeout}秒内停止')
+                return False
+            else:
+                logger.info('监控线程已成功停止')
+        
+        # 清理线程引用
+        with self._lock:
+            self._monitor_thread = None
+        
+        logger.info('数据冗余监控器已完全停止')
+        return True
+
     def data_loaded_handler(self,message:Message):
         """注册更新事件
         - 解除waiting状态  
@@ -192,10 +246,18 @@ class DataRedundancyMonitor:
         """
         self.start()
 
+    def shutdown_handler(self,message:Message):
+        """注册结束处理器  
+        - 关闭线程  
+        """
+        self.stop()
+
     def _subscribe(self):
-        MESSAGE_BUS.subscribe('init',self.init_handler)
-        MESSAGE_BUS.subscribe('data_loaded',self.data_loaded_handler)
-            
+        MESSAGE_BUS.subscribe('init',self.init_handler,'DataRedundancyMonitor')
+        MESSAGE_BUS.subscribe('data_loaded',self.data_loaded_handler,'DataRedundancyMonitor')
+        MESSAGE_BUS.subscribe('shutdown',self.shutdown_handler,'DataRedundancyMonitor')
+
+DATA_REDUNDANCY_MONITOR = DataRedundancyMonitor()
 
 
         

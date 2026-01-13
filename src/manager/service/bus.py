@@ -51,7 +51,7 @@ class MessageBus:
             logger.error(f"加载配置失败: {e}")
             raise ServiceConfigurationException(f"加载配置失败: {e}")
 
-    def subscribe(self, message_type: MessageType, handler: Callable):
+    def subscribe(self, message_type: MessageType, handler: Callable, module_name:str = 'unknown'):
         """订阅消息处理器
         
         Args:
@@ -61,7 +61,7 @@ class MessageBus:
         if message_type not in self.subscribers:
             self.subscribers[message_type] = []
         self.subscribers[message_type].append(handler)
-        logger.debug(f"已订阅消息类型: {message_type} -> {handler.__name__}")
+        logger.debug(f"已订阅消息类型: {module_name}:{message_type} -> {handler.__name__}")
 
     def _dispatch_message(self, message: dict):
         """分发消息给订阅者"""
