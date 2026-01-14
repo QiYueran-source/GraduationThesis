@@ -19,7 +19,8 @@ from src.manager.redis import REDIS_CONNECTOR, REDIS_MONITOR, REDIS_PREFIX_MANAG
 from src.manager.service.bus import MESSAGE_BUS
 from src.manager.service.message import (
     Message,
-    DataLoadedMessage,DataLoadedPayload
+    DataLoadedMessage,DataLoadedPayload,
+    TrainDataUpdatedMessage,TrainDataUpdatedPayload
 )
 
 # 日志
@@ -34,6 +35,7 @@ class TrainDataUpdater:
         self.client = REDIS_CONNECTOR.get_client()
 
         # 内部变量
+        self.first = True  
         self.latest_df:pl.DataFrame = None # 最新的数据框，用于填充
         self.now_year:int = 0 # 当前年份
         self.factors = [s.lower() for s in sorted(get_factors_info()['factor_name'].to_list())]
@@ -218,6 +220,20 @@ class TrainDataUpdater:
             # 6.移除当前year的df
             self.client.delete(REDIS_PREFIX_MANAGER.build_df_key(self.now_year,'factors_df'))
             self.client.delete(REDIS_PREFIX_MANAGER.build_df_key(self.now_year,'return_df'))
+
+            # 7.发布事件  
+            MESSAGE_BUS.publish(
+                message = TrainDataUpdatedMessage(
+                    message_type = 'train_data_updated',
+                    publisher = 'TrainDataUpdater',
+                    payload = TrainDataUpdatedPayload(
+                        first = self.first  
+                    )
+                )
+            )
+            if self.first:
+                self.first = False # 第一次发布后，设置为False  
+
 
     def _subscribe(self):
         MESSAGE_BUS.subscribe(

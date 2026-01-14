@@ -190,9 +190,19 @@ class DataRedundancyMonitor:
 
             # 发布后，进入循环等待，直到更新事件完成
             self.waiting_for_update = True
-            wait_interval = 5
-            while self.waiting_for_update:
-                time.sleep(wait_interval)
+            wait_interval = 5  
+            timeout = 3600
+            start_wait_time = time.time()
+            while self.waiting_for_update and self.started:
+                # 检查是否超时 
+                if time.time() - start_wait_time > timeout:
+                    logger.error(f"等待数据更新超时（{timeout}秒），req_id: {self.req_count}")
+                    self.waiting_for_update = False
+                    break 
+                
+                # 等待  
+                time.sleep(wait_interval) 
+
 
     def stop(self, timeout: float = 10.0) -> bool:
         """停止监控器
@@ -232,15 +242,28 @@ class DataRedundancyMonitor:
 
     def data_loaded_handler(self,message:Message):
         """注册更新事件
-        - 解除waiting状态  
+        - 解除waiting状态
+        - 更新 now_year
         """
-        if message.get('payload',{}).get('request_id',0) == self.req_count:
-            self.waiting_for_update = False
-        elif message.get('payload',{}).get('request_id',0) < self.req_count:
-            logger.info(f'目前有{self.req_count}个请求，完成到第{message.get('payload',{}).get('request_id',0)}，继续等待')
-        else:
-            logger.error('加载数量超过请求，异常')
-            raise  
+        with self._lock:  # 🔒 加锁保护共享状态
+                request_id = message.get('payload', {}).get('request_id', 0)
+                year = message.get('payload', {}).get('year', 0)  # 获取加载的年份
+                
+                if request_id == self.req_count:
+                    # ✅ 更新 now_year（确保不倒退）
+                    if year > self.now_year:
+                        self.now_year = year
+                        logger.info(f'now_year 更新为: {self.now_year}')
+                    
+                    # ✅ 更新等待状态
+                    self.waiting_for_update = False
+                    logger.info(f'收到匹配的更新消息，req_id: {request_id}，year: {year}')
+                    
+                elif request_id < self.req_count:
+                    logger.debug(f'收到较早的更新消息，req_id: {request_id}，当前等待: {self.req_count}，继续等待')
+                else:
+                    logger.error(f'收到未来的更新消息，req_id: {request_id}，当前等待: {self.req_count}，异常')
+                    raise 
     
     def init_handler(self,message:Message):
         """注册初始化事件  
@@ -274,8 +297,9 @@ class DataExpirationMonitor:
         # 配置
         self._expiration_param = {}
 
-        # 内部变量
+        # 线程管理
         self.started = False # 启动标志
+        self._lock = threading.Lock()
 
         # 加载配置
         self._load_config()
@@ -296,14 +320,15 @@ class DataExpirationMonitor:
     def _get_node_num(self) -> int:
         """获取node_info中的node_num"""
         node_info = self.client.hgetall(REDIS_PREFIX_MANAGER.build_node_info_key())
-        return node_info.get('node_num', 0)
+        return int(node_info.get('node_num', 0))
 
     def _get_all_counter(self)->pl.DataFrame:
         """获取所有数据计数器
         - year: 年份
         - month: 月份
         - code: 股票代码
-        - count: 计数
+        - count: 计数  
+        如果没有计数器，返回空df  
         """
         counter_pattern = f"{REDIS_PREFIX_MANAGER.counter_prefix}:*"  
 
@@ -341,16 +366,23 @@ class DataExpirationMonitor:
             # 核心终止条件：cursor=0 表示遍历完毕
             if cursor == 0:
                 break  # 只有游标回到0，才终止循环
-
-        return pl.concat(result_list)
+        
+        if result_list:            
+            return pl.concat(result_list)
+        else:
+            return pl.DataFrame()
 
     def _expiration_loop(self):
         """数据过期循环
         1.遍历所有数据计数器，如果计数器的计数大于等于node_num * clean_up_threshold，则启动倒计时，倒计时结束后，删除数据  
         2.如果计数==node_num，则删除数据  
         """
-        while True:
+        while self.started:
             counter_df = self._get_all_counter()  # 获取所有数据计数器
+
+            if counter_df.is_empty():
+                time.sleep(self._expiration_param.get('interval',30))
+                continue  
 
             # 1.判断哪些已经被全部访问 
             all_visited_df = counter_df.filter(pl.col('count') == self._get_node_num())
@@ -387,20 +419,92 @@ class DataExpirationMonitor:
                         REDIS_PREFIX_MANAGER.build_counter_key(year, month, code),
                         clean_up_countdown
                     )
-                # 一次性执行所有 set 命令（核心优化！）
+                # 一次性执行所有 set 命令
                 set_pipeline.execute()
 
-            # （可选）添加循环休眠，避免空转占用CPU
-            time.sleep(1)  # 根据业务需求调整休眠时间，比如1秒
+            # （添加循环休眠，避免空转占用CPU
+            time.sleep(self._expiration_param.get('interval',30))  
 
     def start(self):
-        pass 
+        with self._lock:
+            if self.started:
+                logger.warning('数据过期监控器已经启动')
+                return
+        
+            # 设置启动标志
+            self.started = True
+            
+            # 创建线程（在锁内，因为很快）
+            self._monitor_thread = threading.Thread(
+                target=self._expiration_loop,
+                name="DataExpirationMonitor",
+                daemon=True
+            )
+    
+        # 锁外启动线程（避免线程启动时访问锁）
+        self._monitor_thread.start()
+        logger.info('数据过期监控器已启动')            
 
-    def stop(self):
-        pass 
+
+    def stop(self, timeout: float = 10.0) -> bool:
+        """停止数据过期监控器
+        
+        Args:
+            timeout: 等待线程结束的超时时间（秒）
+            
+        Returns:
+            bool: 是否成功停止
+        """
+        try:
+            # 锁内：检查和修改共享状态
+            with self._lock:
+                if not self.started:
+                    logger.warning('数据过期监控器未启动')
+                    return True
+                
+                # 设置停止标志
+                self.started = False
+                
+                # 获取线程引用（在锁内）
+                monitor_thread = self._monitor_thread
+            
+            # 锁外：等待线程结束
+            if monitor_thread and monitor_thread.is_alive():
+                logger.info(f'等待监控线程结束（超时: {timeout}秒）...')
+                monitor_thread.join(timeout=timeout)
+                
+                if monitor_thread.is_alive():
+                    logger.warning(f'监控线程未能在{timeout}秒内停止')
+                    return False
+                else:
+                    logger.info('监控线程已成功停止')
+            
+            # 锁内：清理线程引用
+            with self._lock:
+                self._monitor_thread = None
+            
+            logger.info('数据过期监控器已完全停止')
+            return True
+            
+        except Exception as e:
+            logger.error(f"停止数据过期监控器时发生异常: {e}", exc_info=True)
+            # 即使出错，也尝试清理状态
+            with self._lock:
+                self.started = False
+                self._monitor_thread = None
+            return False
+
+    def first_train_data_update_handler(self,message:Message):
+        """第一次加载后，启动"""
+        if message['payload']['first']:
+            self.start()
+
+    def shutdown_handler(self, message:Message):
+        self.stop()
     
     def _subscribe(self):
-        pass 
-        
-        
+        """订阅数据加载事件"""
+        MESSAGE_BUS.subscribe('train_data_updated',self.first_train_data_update_handler,'DataExpirationMonitor')
+        MESSAGE_BUS.subscribe('shutdown',self.shutdown_handler,'DataExpirationMonitor')
+
 DATA_EXPIRATION_MONITOR = DataExpirationMonitor()

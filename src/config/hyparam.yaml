@@ -26,7 +26,7 @@ redis_redundancy:
 
 # redis数据过期配置  
 redis_expiration:
-  interval: 120 # 检查间隔
+  interval: 30 # 检查间隔
   clean_up_threshold: 0.85 # 清理阈值，当85%的node访问过该数据后，启动倒计时  
   clean_up_countdown: 300 # 倒计时300秒，倒计时结束后，删除数据   
   

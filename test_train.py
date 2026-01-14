@@ -27,7 +27,7 @@ MESSAGE_BUS.publish(
 )
 
 import time
-time.sleep(10)
+time.sleep(30)
 x = DATA_EXPIRATION_MONITOR._get_all_counter()
 print(x)
 

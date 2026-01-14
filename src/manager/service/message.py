@@ -28,9 +28,7 @@ class DataLoadedPayload(TypedDict):
 
 class TrainDataUpdatedPayload(TypedDict):
     """训练数据更新payload"""
-    available_periods: int
-    cleaned_keys: List[str]     # 被清理的键列表
-    new_keys: List[str]         # 新增的键列表
+    first:bool                  # 是否是第一次发布 
 
 class NodeHealthCheckPayload(TypedDict):
     """节点健康检查payload"""
