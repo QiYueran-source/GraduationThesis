@@ -13,6 +13,7 @@ import json
 from threading import Lock
 
 # 组件
+from src.manager.database import get_factors_info
 from src.manager.redis import REDIS_CONNECTOR, REDIS_MONITOR, REDIS_PREFIX_MANAGER
 from src.manager.service.bus import MESSAGE_BUS
 from src.manager.service.message import (
@@ -34,12 +35,149 @@ class TrainDataUpdater:
         # 内部变量
         self.latest_df:pl.DataFrame = None # 最新的数据框，用于填充
         self.now_year:int = 0 # 当前年份
+        self.factors = [s.lower() for s in sorted(get_factors_info()['factor_name'].to_list())]
 
         # 线程锁，保证一次只处理一个年份的数据
         self.lock = Lock()
 
         # 注册处理器
         self._subscribe()
+
+    # 数据片加载
+    def _load_data_from_redis(self, year: int) -> tuple[pl.DataFrame, pl.DataFrame]:
+        """从Redis加载因子和收益率数据（单独抽离为函数，便于复用/测试）"""
+        # 1. 构建Redis键
+        factors_key = REDIS_PREFIX_MANAGER.build_df_key(year, 'factors_df')
+        return_key = REDIS_PREFIX_MANAGER.build_df_key(year, 'return_df')
+        
+        # 2. 读取并校验数据
+        factors_raw = self.client.get(factors_key)
+        return_raw = self.client.get(return_key)
+        if not factors_raw or not return_raw:
+            raise ValueError(f"年份{year}的因子/收益率数据在Redis中不存在")
+        
+        # 3. 解析JSON并转为DataFrame（增加异常处理）
+        try:
+            factors_df_dicts = json.loads(factors_raw)
+            return_df_dicts = json.loads(return_raw)
+        except json.JSONDecodeError as e:
+            raise Exception(f"年份{year}的JSON数据解析失败: {e}") from e
+        
+        # 4. 转为Polars DF + 日期转换（容错+指定时区）
+        date_parse_expr = pl.col('accper').str.strptime(
+            pl.Date, format='%Y-%m-%d', strict=False  # strict=False跳过非法日期
+        ).fill_null(pl.date(1900,1,1))  # 非法日期转为1900-01-01，后续过滤
+        
+        factors_df = pl.DataFrame(factors_df_dicts).with_columns(date_parse_expr)
+        return_df = pl.DataFrame(return_df_dicts).with_columns(date_parse_expr)
+        
+        # 5. 数据类型校验（因子列转为数值型，避免字符串导致后续计算失败）
+        factors_df = factors_df.with_columns(
+            [pl.col(f).cast(pl.Float64, strict=False) for f in self.factors]
+        )
+        return_df = return_df.with_columns(
+            pl.col('monthly_return').cast(pl.Float64, strict=False)
+        )
+        
+        # 6. 过滤非法数据
+        factors_df = factors_df.filter(pl.col('accper') != pl.date(1900,1,1))
+        return_df = return_df.filter(pl.col('accper') != pl.date(1900,1,1))
+        
+        return factors_df, return_df
+
+    def _standardize_factors(self, factors_df: pl.DataFrame) -> pl.DataFrame:
+        """因子标准化：按accper分组做Z-score（(x-mean)/std），处理标准差为0的情况"""
+        std_exprs = []
+        for factor in self.factors:
+            # 缓存分组均值和标准差（ddof=0：总体标准差）
+            mean_col = pl.col(factor).mean().over('accper').alias(f"{factor}_mean")
+            std_col = pl.col(factor).std(ddof=0).over('accper').alias(f"{factor}_std")
+            
+            # 标准化逻辑：标准差≠0则计算Z-score，否则填0
+            std_factor_expr = pl.when(std_col != 0)\
+            .then((pl.col(factor) - mean_col) / std_col)\
+            .otherwise(0.0)\
+            .alias(factor)
+            
+            std_exprs.extend([mean_col, std_col, std_factor_expr])
+        
+        # 执行标准化 + 删除临时列
+        std_factors_df = factors_df.with_columns(std_exprs)
+        std_factors_df = std_factors_df.drop(
+            [f"{f}_mean" for f in self.factors] + [f"{f}_std" for f in self.factors]
+        )
+    
+        return std_factors_df
+
+    def _merge_and_fill_data(self, merged_df: pl.DataFrame) -> pl.DataFrame:
+        """纵向合并历史数据 + 分组填充空值"""
+        # 1. 纵向合并
+        common_cols = ['stkcd', 'accper'] + self.factors + ['monthly_return']
+        if self.latest_df is None:
+            combined_df = merged_df.select(common_cols)
+        else:
+            # 合并前先对齐列顺序
+            combined_df = self.latest_df.select(common_cols).vstack(merged_df.select(common_cols))
+            
+            # 按stkcd和accper去重（避免重复数据）
+            combined_df = combined_df.unique(subset=['stkcd', 'accper'], keep='last')
+        
+        # 2. 分组填充（先forward再backward，最后补0，按stkcd分组）
+        fill_exprs = [
+            pl.col(col)
+            .over(
+                partition_by='stkcd',       # 按股票分组
+                order_by='accper',          # 分组内按时间排序（关键！保证填充顺序）
+                descending=False            # 时间从早到晚排序
+            ) 
+            .fill_null(strategy='forward')       # 前向填充（优先用历史值）
+            .fill_null(strategy='backward')      # 后向填充（补充剩余空值）
+            .fill_null(value=0.0)                # 兜底填0
+            .fill_nan(value=0.0)                 # NaN填0
+            .alias(col)
+            for col in self.factors + ['monthly_return']
+        ]
+        
+        clean_df = combined_df.with_columns(fill_exprs)
+    
+        # 3. 过滤当前年份数据（仅保留处理的年度数据）
+        clean_df = clean_df.filter(pl.col('accper').dt.year() == self.now_year)
+        
+        # 4. 校验填充结果
+        null_counts = clean_df.select([pl.col(col).is_null().sum() for col in self.factors + ['monthly_return']])
+        logger.debug(f"填充后空值统计：{null_counts.to_dict()}")
+        
+        return clean_df
+
+    def _store_data_slices(self, clean_df: pl.DataFrame):
+        """批量存储数据切片到Redis（替代逐行循环，提升性能）"""
+        # 1. 预处理数据：按年份、月份、股票代码分组
+        slice_data = clean_df.with_columns(
+            pl.col('accper').dt.year().alias('year'),
+            pl.col('accper').dt.month().alias('month')
+        ).select(['year', 'month', 'stkcd', *self.factors, 'monthly_return'])
+        
+        # 2. 按(year, month, stkcd)分组，批量生成Redis键值对
+        redis_pipeline = self.client.pipeline()  # 批量操作
+        for row in slice_data.to_dicts():
+            year = row.pop('year')
+            month = row.pop('month')
+            code = row.pop('stkcd')
+            monthly_return = row.pop('monthly_return')
+            
+            # 按因子名排序，保证顺序一致
+            sorted_factors = [v for k, v in sorted(row.items())]
+            slice_value = json.dumps([sorted_factors, monthly_return])
+            
+            # 构建Redis键并加入管道
+            train_slice_key = REDIS_PREFIX_MANAGER.build_train_slice_key(year, month, code)
+            counter_key = REDIS_PREFIX_MANAGER.build_counter_key(year, month, code)
+            redis_pipeline.set(train_slice_key, slice_value, ex=7200) # 存储数据片
+            redis_pipeline.set(counter_key, 0, ex=7200) # 初始化计数器为0
+        
+        # 3. 执行批量写入
+        redis_pipeline.execute()
+        logger.info(f"年份{self.now_year}共存储{len(slice_data)}条数据切片")
 
     def data_loaded_handler(self, message: Message):
         """处理数据加载事件
@@ -53,67 +191,32 @@ class TrainDataUpdater:
         with self.lock:
             # 1.加载df  
             year = message['payload']['year']
-            factors_df_dicts = json.loads(self.client.get(REDIS_PREFIX_MANAGER.build_df_key(year,'factors_df')))
-            return_df_dicts = json.loads(self.client.get(REDIS_PREFIX_MANAGER.build_df_key(year,'return_df')))
-            factors_df = pl.DataFrame(factors_df_dicts).with_columns(pl.col('accper').str.strptime(pl.Date,format='%Y-%m-%d').alias('accper'))
-            return_df = pl.DataFrame(return_df_dicts).with_columns(pl.col('accper').str.strptime(pl.Date,format='%Y-%m-%d').alias('accper'))
             self.now_year = year
-
-            print(factors_df.sort('accper').head())
-
-            # 2.因子标准化（按 stkcd 分组，对每个因子进行 z-score 标准化）
+            factors_df, return_df = self._load_data_from_redis(year)
+            
+            # 2.因子标准化（按 accper 分组，对每个因子进行 z-score 标准化）
             # 标准化公式: (x - mean) / std
             # 需要保留所有行和列，只标准化因子列
-            
-            # 获取需要标准化的因子列（排除 stkcd 和 accper）
-            factor_cols = sorted([col for col in factors_df.columns 
-                          if col != 'stkcd' and col != 'accper'])
-
-            
-            # 按 stkcd 分组，对每个因子列进行标准化
+            # 按 accper 分组，对每个因子列进行标准化
             # 使用 over() 窗口函数，保留所有行
-            std_factors_df = factors_df.with_columns([
-                ((pl.col(factor) - pl.col(factor).mean().over('accper')) / 
-                 pl.col(factor).std().over('accper')).alias(factor)
-                for factor in factor_cols
-            ])
+            std_factors_df = self._standardize_factors(factors_df)
 
-            # 3.连接因子和收益率（收益率的日期滞后一月）    
+            # 3.连接因子和收益率（收益率的日期滞后一月,1月的因子数据与2月的收益率数据连接）    
             return_df = return_df.with_columns(
                 pl.col('accper').dt.offset_by('-1mo').alias('accper')
             )
-            merged_df:pl.DataFrame = std_factors_df.join(return_df, on=['stkcd','accper'], how='left') # TODO 这一步大概率有问题  
+            merged_df:pl.DataFrame = std_factors_df.join(return_df, on=['stkcd','accper'], how='left')
 
             # 4.纵向合并df，进行填充（如果latest_df不存在，则使用向前-向后-补0三步骤填充）
-            if self.latest_df is None:
-                clean_df = merged_df.fill_null(strategy='forward').fill_null(strategy='backward').fill_null(value=0)
-                clean_df = clean_df.select(['stkcd','accper',*factor_cols,'monthly_return'])
-            else:
-                merged_df = merged_df.select(['stkcd','accper',*factor_cols,'monthly_return'])
-                clean_df = merged_df.vstack(self.latest_df).fill_null(strategy='forward').filter(pl.col('accper').dt.year() == self.now_year).select(['stkcd','accper',*factor_cols,'monthly_return'])
-
+            clean_df = self._merge_and_fill_data(merged_df)
             self.latest_df = clean_df
 
             # 5.将数据处理为数据片  
-            for row in clean_df.to_dicts():
-                code = row.pop('stkcd')
-                accper = row.pop('accper')
-                year,month = accper.year,accper.month
-                monthly_return = row.pop('monthly_return')
-                sorted_factors = [v for k,v in sorted(row.items())] # 按首字母排序
-            
-                # 构建数据片键
-                train_slice_key = REDIS_PREFIX_MANAGER.build_train_slice_key(year,month,code)
-                self.client.set(
-                    name = train_slice_key,
-                    value = json.dumps([sorted_factors,monthly_return]),
-                    ex=7200
-                )
+            self._store_data_slices(clean_df)
 
             # 6.移除当前year的df
             self.client.delete(REDIS_PREFIX_MANAGER.build_df_key(self.now_year,'factors_df'))
             self.client.delete(REDIS_PREFIX_MANAGER.build_df_key(self.now_year,'return_df'))
-            
 
     def _subscribe(self):
         MESSAGE_BUS.subscribe(
@@ -122,3 +225,16 @@ class TrainDataUpdater:
         )
 
 TRAIN_DATA_UPDATER = TrainDataUpdater()
+
+class DataExpirationMonitor:
+    def __init__(self):
+        """数据过期监控器
+        1.获取
+        """
+        # redis客户端
+        self.client = REDIS_CONNECTOR.get_client()
+
+        # 内部变量
+        self.started = False # 启动标志
+        self.now_year = 0 # 当前年份
+        self.loader_year = [] # 已加载年份

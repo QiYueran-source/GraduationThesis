@@ -45,11 +45,10 @@ class DataRedundancyMonitor:
 
         # 加载配置 
         self._load_config() 
-        self._monitor_thread: Optional[threading.Thread] = None
-        self._lock = threading.Lock()  # 保护共享状
 
         # 线程管理 
-
+        self._monitor_thread: Optional[threading.Thread] = None
+        self._lock = threading.Lock()  # 保护共享状
 
         # 初始化now_year
         self.now_year = self._train_param.get('start_year',1997)
@@ -260,4 +259,20 @@ class DataRedundancyMonitor:
 DATA_REDUNDANCY_MONITOR = DataRedundancyMonitor()
 
 
+class DataExpirationMonitor:
+    def __init__(self):
+        """数据过期监控器
+        1.获取
+        """
+        # redis客户端
+        self.client = REDIS_CONNECTOR.get_client()
+
+        # 内部变量
+        self.started = False # 启动标志
+        self.now_year = 0 # 当前年份
+        self.loader_year = [] # 已加载年份
+        self.waiting_for_update = False # 等待数据更新  
+        self.req_count = 0 # 请求记录
+
+        
         
