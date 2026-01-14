@@ -10,17 +10,25 @@ train:
   end_year: 2025 # 结束年份
   # 默认最小粒度为月份，一次滚动一个月，提供一个月的因子数据和对应下一个月的收益数据  
   
-
 # 评价指标计算  
 performance:
   risk_free_rate: 0.015 # 无风险利率  
+
+
+# service配置   
+# 主机的数据流水线服务配置，需要和node的配置契合  
 
 # redis数据冗余配置  
 redis_redundancy:
   interval: 120 # 检查间隔
   min_periods_year: 1 # 冗余下限为 1年   
   max_periods_year: 2 # 冗余上限为 2年   
+
+# redis数据过期配置  
+redis_expiration:
+  interval: 120 # 检查间隔
   clean_up_threshold: 0.85 # 清理阈值，当85%的node访问过该数据后，启动倒计时  
   clean_up_countdown: 300 # 倒计时300秒，倒计时结束后，删除数据   
+  
   
   

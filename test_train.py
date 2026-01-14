@@ -5,6 +5,8 @@ import datetime as dt
 from src.manager.redis import REDIS_CONNECTOR, REDIS_MONITOR
 from src.manager.service import DATA_REDUNDANCY_MONITOR
 from src.manager.service import TRAIN_DATA_UPDATER
+from src.manager.service import DATA_EXPIRATION_MONITOR
+
 
 client = REDIS_CONNECTOR.get_client()
 
@@ -25,5 +27,9 @@ MESSAGE_BUS.publish(
 )
 
 import time
-time.sleep(120)
+time.sleep(10)
+x = DATA_EXPIRATION_MONITOR._get_all_counter()
+print(x)
+
+time.sleep(160)
 MESSAGE_BUS.stop()

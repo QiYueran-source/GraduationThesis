@@ -4,10 +4,13 @@ redis数据监控器
 2.数据是否过期 exp_monitor  
 """
 # 库
+import polars as pl
 import threading
 from typing import Any,Optional
 import time
 import yaml
+from typing import Dict
+from collections import defaultdict
 
 # 组件
 from src.manager.redis import REDIS_CONNECTOR
@@ -51,7 +54,7 @@ class DataRedundancyMonitor:
         self._lock = threading.Lock()  # 保护共享状
 
         # 初始化now_year
-        self.now_year = self._train_param.get('start_year',1997)
+        self.now_year = self._train_param.get('start_year',1997) - 1 # 初始化为开始年份的前一年,now_year是当前redis中存在的最大数据片年份
 
         # 注册
         self._subscribe()
@@ -171,7 +174,7 @@ class DataRedundancyMonitor:
             load_years = self._redundancy_param.get('max_periods_year',2) - loaded_year_count
             self.req_count+=1 # req计数器+1
             payload = LoadRequestPayload(
-                year_list=[self.now_year + i for i in range(1,load_years+1)],
+                year_list=[self.now_year + i for i in range(1,load_years+1) if self.now_year + i <= self._train_param.get('end_year',2025)],
                 stock_pool = self._train_param.get('stock_pool','test'),
                 request_id = self.req_count
             )
@@ -262,17 +265,142 @@ DATA_REDUNDANCY_MONITOR = DataRedundancyMonitor()
 class DataExpirationMonitor:
     def __init__(self):
         """数据过期监控器
-        1.获取
+        1.获取node_info中的node_num  
+        2.获取
         """
         # redis客户端
         self.client = REDIS_CONNECTOR.get_client()
 
+        # 配置
+        self._expiration_param = {}
+
         # 内部变量
         self.started = False # 启动标志
-        self.now_year = 0 # 当前年份
-        self.loader_year = [] # 已加载年份
-        self.waiting_for_update = False # 等待数据更新  
-        self.req_count = 0 # 请求记录
 
+        # 加载配置
+        self._load_config()
+
+        # 注册
+        self._subscribe()
+
+    def _load_config(self):
+        """加载配置"""
+        try:
+            with open('src/config/hyparam.yaml', 'r', encoding = 'utf-8') as f:
+                config = yaml.safe_load(f)
+                self._expiration_param = config.get('redis_expiration', {})
+        except Exception as e:
+            logger.error(f"加载配置失败: {e}")
+            raise 
+
+    def _get_node_num(self) -> int:
+        """获取node_info中的node_num"""
+        node_info = self.client.hgetall(REDIS_PREFIX_MANAGER.build_node_info_key())
+        return node_info.get('node_num', 0)
+
+    def _get_all_counter(self)->pl.DataFrame:
+        """获取所有数据计数器
+        - year: 年份
+        - month: 月份
+        - code: 股票代码
+        - count: 计数
+        """
+        counter_pattern = f"{REDIS_PREFIX_MANAGER.counter_prefix}:*"  
+
+        result_list = [] 
+        cursor = 0
+        while True:
+            # 调用 scan：cursor 是上一次返回的游标，初始为0
+            cursor, keys = self.client.scan(cursor=cursor, match=counter_pattern, count=5000)
+            
+            # 处理本次返回的键（即使 keys 为空，也不提前 break）
+            if keys:  # 只有有键时才处理，避免空循环
+                values = self.client.mget(keys)
+                # 你的解析逻辑...（不变）
+                for key, value in zip(keys, values):
+                    if value is None:
+                        continue
+                    key_parts = key.split(":")
+                    if len(key_parts) < 6:
+                        print(f"无效的 Redis 键格式：{key}，跳过")
+                        continue
+                    year = int(key_parts[-3])
+                    month = int(key_parts[-2])
+                    code = key_parts[-1]
+                    count = int(value)
+    
+                    result_list.append(
+                        pl.DataFrame({
+                            'year': [year],
+                            'month': [month],
+                            'code': [code],
+                            'count': [count]
+                        })
+                    )
+    
+            # 核心终止条件：cursor=0 表示遍历完毕
+            if cursor == 0:
+                break  # 只有游标回到0，才终止循环
+
+        return pl.concat(result_list)
+
+    def _expiration_loop(self):
+        """数据过期循环
+        1.遍历所有数据计数器，如果计数器的计数大于等于node_num * clean_up_threshold，则启动倒计时，倒计时结束后，删除数据  
+        2.如果计数==node_num，则删除数据  
+        """
+        while True:
+            counter_df = self._get_all_counter()  # 获取所有数据计数器
+
+            # 1.判断哪些已经被全部访问 
+            all_visited_df = counter_df.filter(pl.col('count') == self._get_node_num())
+
+            # 初始化删除用的 Pipeline
+            delete_pipeline = self.client.pipeline(transaction=False)  # 非事务模式，更快
+            if not all_visited_df.is_empty():
+                # 批量收集删除命令（无需循环执行，一次性添加到 Pipeline）
+                for row in all_visited_df.to_dicts():
+                    year, month, code = row['year'], row['month'], row['code']
+                    # 添加删除 train_slice 键的命令
+                    delete_pipeline.delete(REDIS_PREFIX_MANAGER.build_train_slice_key(year, month, code))
+                    # 添加删除 counter 键的命令
+                    delete_pipeline.delete(REDIS_PREFIX_MANAGER.build_counter_key(year, month, code))
+                # 一次性执行所有删除命令（核心优化！）
+                delete_pipeline.execute()
+
+            # 从df中移除这些数据
+            counter_df = counter_df.join(all_visited_df, on=['year','month','code'], how='anti')
+            
+            # 2.判断哪些需要启动倒计时
+            clean_up_threshold = self._expiration_param.get('clean_up_threshold', 0.85)
+            clean_up_countdown = self._expiration_param.get('clean_up_countdown', 300)
+            need_countdown_df = counter_df.filter(pl.col('count') >= self._get_node_num() * clean_up_threshold)
+
+            # 初始化设置用的 Pipeline
+            set_pipeline = self.client.pipeline(transaction=False)
+            if not need_countdown_df.is_empty():
+                # 批量收集 set 命令
+                for row in need_countdown_df.to_dicts():
+                    year, month, code = row['year'], row['month'], row['code']
+                    # 添加设置 counter 键的命令
+                    set_pipeline.set(
+                        REDIS_PREFIX_MANAGER.build_counter_key(year, month, code),
+                        clean_up_countdown
+                    )
+                # 一次性执行所有 set 命令（核心优化！）
+                set_pipeline.execute()
+
+            # （可选）添加循环休眠，避免空转占用CPU
+            time.sleep(1)  # 根据业务需求调整休眠时间，比如1秒
+
+    def start(self):
+        pass 
+
+    def stop(self):
+        pass 
+    
+    def _subscribe(self):
+        pass 
         
         
+DATA_EXPIRATION_MONITOR = DataExpirationMonitor()

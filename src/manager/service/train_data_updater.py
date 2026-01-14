@@ -11,6 +11,7 @@ import redis
 import yaml
 import json
 from threading import Lock
+import time
 
 # 组件
 from src.manager.database import get_factors_info
@@ -226,15 +227,3 @@ class TrainDataUpdater:
 
 TRAIN_DATA_UPDATER = TrainDataUpdater()
 
-class DataExpirationMonitor:
-    def __init__(self):
-        """数据过期监控器
-        1.获取
-        """
-        # redis客户端
-        self.client = REDIS_CONNECTOR.get_client()
-
-        # 内部变量
-        self.started = False # 启动标志
-        self.now_year = 0 # 当前年份
-        self.loader_year = [] # 已加载年份
