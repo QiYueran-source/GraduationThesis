@@ -12,14 +12,14 @@ import functools
 
 # 组件
 from src.manager.redis import REDIS_CONNECTOR,RedisConnector, REDIS_PREFIX_MANAGER
-from .message import Message, MessageType
+from src.manager.service.message import Message, MessageType
 
 # 日志
 from src.utils.logger import get_module_logger
 logger = get_module_logger(__name__, prefix='[MessageBus]')
 
 # 异常
-from .exception import ServiceConfigurationException
+from src.manager.service.exception import ServiceConfigurationException
 
 # 消息总线
 class MessageBus:

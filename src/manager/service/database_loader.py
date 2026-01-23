@@ -20,7 +20,7 @@ from src.utils.logger import get_module_logger
 logger = get_module_logger(__name__, prefix='[DatabaseLoader]')
 
 # 异常
-from .exception import (
+from src.manager.service.exception import (
     ServiceConfigurationException,
     ServiceException
 )

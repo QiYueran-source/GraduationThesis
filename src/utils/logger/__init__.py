@@ -8,8 +8,8 @@ import logging
 import yaml
 
 # 自定义组件
-from .handler import create_date_rotating_handler
-from .formatter import create_formatter
+from src.utils.logger.handler import create_date_rotating_handler
+from src.utils.logger.formatter import create_formatter
 
 # 配置和常量  
 with open('src/config/logger.yaml', 'r', encoding = 'utf-8') as f:

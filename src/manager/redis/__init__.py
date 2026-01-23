@@ -1,10 +1,10 @@
 """
 Redis模块，用于管理Redis连接  
 """
-from .connection import RedisConnector
-from .monitor import ConnectionMonitor
-from .exception import RedisException, RedisConnectionException, RedisConfigurationException
-from .keys import RedisPrefixManager
+from src.manager.redis.connection import RedisConnector
+from src.manager.redis.monitor import ConnectionMonitor
+from src.manager.redis.exception import RedisException, RedisConnectionException, RedisConfigurationException
+from src.manager.redis.keys import RedisPrefixManager
 
 # 全局连接管理器
 REDIS_CONNECTOR = RedisConnector() 

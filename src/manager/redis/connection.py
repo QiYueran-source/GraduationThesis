@@ -50,9 +50,10 @@ class RedisConnector:
         try:
             with open('src/config/redis.yaml', 'r', encoding = 'utf-8') as f:
                 self._config = yaml.safe_load(f)
-                self._config = {
-                    **self._config, 'password': password
-                }
+                if 'parameters' in self._config:
+                    self._config['parameters']['password'] = password
+                else:
+                    raise 
 
         except Exception as e:
             logger.error(f"Redis配置读取失败: {e}")
@@ -123,7 +124,6 @@ class RedisConnector:
         """获取Redis客户端 (核心接口)"""
         # 检查连接状态
         if self._client is None or not self._is_connected:
-            self._load_config()  # 确保配置已加载
             self._create_client()  # 创建连接
             return self._client
         

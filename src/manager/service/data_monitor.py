@@ -15,8 +15,8 @@ from collections import defaultdict
 # 组件
 from src.manager.redis import REDIS_CONNECTOR
 from src.manager.redis import REDIS_PREFIX_MANAGER
-from .bus import MESSAGE_BUS 
-from .message import (
+from src.manager.service.bus import MESSAGE_BUS 
+from src.manager.service.message import (
     Message,
     InitMessage,InitMessagePayload,
     LoadRequestMessage,LoadRequestPayload
@@ -27,7 +27,7 @@ from src.utils.logger import get_module_logger
 logger = get_module_logger(__name__,'[DataMonitor]')
 
 # 异常 
-from .exception import * 
+from src.manager.service.exception import * 
 
 # 数据冗余监控器 
 class DataRedundancyMonitor:

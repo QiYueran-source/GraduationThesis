@@ -7,7 +7,7 @@ import threading
 import yaml
 from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
-from .connection import RedisConnector
+from src.manager.redis.connection import RedisConnector
 
 # 日志 
 from src.utils.logger import get_module_logger

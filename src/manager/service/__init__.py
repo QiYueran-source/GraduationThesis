@@ -1,11 +1,11 @@
 """
 训练服务，用于管理训练的上下文  
 """
-from .database_loader import DATABASE_LOADER
-from .data_monitor import DATA_REDUNDANCY_MONITOR, DATA_EXPIRATION_MONITOR
-from .train_data_updater import TRAIN_DATA_UPDATER
-from .bus import MESSAGE_BUS
-from .message import (
+from src.manager.service.database_loader import DATABASE_LOADER
+from src.manager.service.data_monitor import DATA_REDUNDANCY_MONITOR, DATA_EXPIRATION_MONITOR
+from src.manager.service.train_data_updater import TRAIN_DATA_UPDATER
+from src.manager.service.bus import MESSAGE_BUS
+from src.manager.service.message import (
     Message,
     MessageType,
     InitMessage,
@@ -17,7 +17,7 @@ from .message import (
     ShutdownMessage
 )
 
-from .message import (
+from src.manager.service.message import (
     InitMessagePayload,
     LoadRequestMessage,
     DataLoadedMessage,
