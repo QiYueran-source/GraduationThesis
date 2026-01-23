@@ -62,7 +62,7 @@ class DatabaseLoader:
                 value = json.dumps(return_df.to_dicts()),
                 ex=7200
             )  
-            logger.info(f"处理数据加载请求: 加载{message['payload']['request_id']}的{each_year}年数据")
+            logger.info(f"处理数据加载请求: 加载请求{message['payload']['request_id']}的{each_year}年数据")
 
             # 发布数据加载完成事件
             payload = DataLoadedPayload(

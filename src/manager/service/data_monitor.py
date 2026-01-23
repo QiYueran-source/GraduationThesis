@@ -320,7 +320,9 @@ class DataExpirationMonitor:
     def _get_node_num(self) -> int:
         """获取node_info中的node_num"""
         node_info = self.client.hgetall(REDIS_PREFIX_MANAGER.build_node_info_key())
-        return int(node_info.get('node_num', 0))
+        node_num = int(node_info.get('node_num', 0))
+        logger.info(f"获取node_num: {node_num}")
+        return max(node_num, 1)
 
     def _get_all_counter(self)->pl.DataFrame:
         """获取所有数据计数器

@@ -148,7 +148,7 @@ class TrainDataUpdater:
         
         # 4. 校验填充结果
         null_counts = clean_df.select([pl.col(col).is_null().sum() for col in self.factors + ['monthly_return']])
-        logger.debug(f"填充后空值统计：{null_counts.to_dict()}")
+        #logger.debug(f"填充后空值统计：{null_counts.to_dict()}")
         
         return clean_df
 
