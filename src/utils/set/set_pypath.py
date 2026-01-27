@@ -1,4 +1,5 @@
 import sys 
+import os 
 
 # 获取项目根目录
 def set_pypath():
@@ -9,3 +10,5 @@ def set_pypath():
 
     # 添加src目录到Python路径
     sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
+
+set_pypath() # 自动执行

@@ -20,13 +20,13 @@ performance:
 
 # redis数据冗余配置  
 redis_redundancy:
-  interval: 120 # 检查间隔
+  interval: 5 # 检查间隔
   min_periods_year: 1 # 冗余下限为 1年   
-  max_periods_year: 2 # 冗余上限为 2年   
+  max_periods_year: 3 # 冗余上限为 3年   
 
 # redis数据过期配置  
 redis_expiration:
-  interval: 30 # 检查间隔
+  interval: 5 # 检查间隔
   clean_up_threshold: 0.85 # 清理阈值，当85%的node访问过该数据后，启动倒计时  
   clean_up_countdown: 300 # 倒计时300秒，倒计时结束后，删除数据   
   

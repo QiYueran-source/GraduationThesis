@@ -38,7 +38,7 @@ class TrainDataUpdater:
         self.first = True  
         self.latest_df:pl.DataFrame = None # 最新的数据框，用于填充
         self.now_year:int = 0 # 当前年份
-        self.factors = [s.lower() for s in sorted(get_factors_info()['factor_name'].to_list())]
+        self.factors = sorted([s.lower() for s in get_factors_info()['factor_name'].to_list()])
 
         # 线程锁，保证一次只处理一个年份的数据
         self.lock = Lock()
