@@ -1,11 +1,13 @@
-node_num: 2
-
-node1:
-  name: 'home_server_1'
-  ip: '127.0.0.1'
-  port: 8899
-
-node2:
-  name: 'home_server_2'
-  ip: '127.0.0.2'
-  port: 8899
+web:
+  node_host: "43.139.192.176" # node的主机
+  port_range: # frp端口范围，用于分配给node的frp端口
+    - 8191
+    - 8220 
+  ms_clear_host: "43.139.192.176" # 清空端口列表的web服务主机
+  ms_clear_port: 8190 # 清空端口列表的web服务端口
+  ms_clear_url: "/clear" # 清空端口列表的web服务url
+  max_worker: 16 # 最大并发数
+  timeout: 10 # 超时时间
+  
+monitor:
+  interval: 120 # 每隔120秒请求一次状态，查看还有多少端口在运行  
