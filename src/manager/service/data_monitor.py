@@ -43,7 +43,8 @@ class DataRedundancyMonitor:
         self.req_count = 0 # 请求记录
 
         # 配置
-        self._train_param = {}
+        self._stock_pool_param = {}
+        self._meta_param = {}
         self._redundancy_param = {}
 
         # 加载配置 
@@ -53,8 +54,8 @@ class DataRedundancyMonitor:
         self._monitor_thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()  # 保护共享状
 
-        # 初始化now_year
-        self.now_year = self._train_param.get('start_year',1997) - 1 # 初始化为开始年份的前一年,now_year是当前redis中存在的最大数据片年份
+        # 初始化now_year（meta.start_year 的前一年，表示当前 redis 中最大数据片年份的前一年）
+        self.now_year = self._meta_param.get('start_year', 1997) - 1
 
         # 注册
         self._subscribe()
@@ -68,12 +69,13 @@ class DataRedundancyMonitor:
             logger.error(f"加载配置失败: {e}")
             raise ServiceConfigurationException(f"加载配置失败: {e}")
         
-        # 分离配置  
-        self._train_param = config.get('train',{})
-        self._redundancy_param = config.get('redis_redundancy',{}) 
+        # 分离配置（弃用 train，改用 stock_pool + meta）
+        self._stock_pool_param = config.get('stock_pool', {})
+        self._meta_param = config.get('meta', {})
+        self._redundancy_param = config.get('redis_redundancy', {})
 
-        if not self._train_param or not self._redundancy_param:
-            logger.error('data_monitor配置加载异常')
+        if not self._meta_param or not self._redundancy_param:
+            logger.error('data_monitor配置加载异常：需提供 meta 与 redis_redundancy')
             raise 
         
         # 检查配置逻辑 
@@ -163,20 +165,19 @@ class DataRedundancyMonitor:
         while self.started:
             loaded_year_count = self._count_slice_year()
 
-            # 如果数据充足，则停止
+            # 如果数据充足，则静默等待（仅缺失数据时记录日志）
             if loaded_year_count > self._redundancy_param.get('min_periods_year',1):
-                count+=1
-                logger.info(f'第{count}次检测，没有缺失，等待{self._redundancy_param.get('interval',120)}s')
-                time.sleep(self._redundancy_param.get('interval',120))
+                count += 1
+                time.sleep(self._redundancy_param.get('interval', 120))
                 continue
 
             # 如果不足，发布加载事件(次数为)
             load_years = self._redundancy_param.get('max_periods_year',2) - loaded_year_count
             self.req_count+=1 # req计数器+1
             payload = LoadRequestPayload(
-                year_list=[self.now_year + i for i in range(1,load_years+1) if self.now_year + i <= self._train_param.get('end_year',2025)],
-                stock_pool = self._train_param.get('stock_pool','test'),
-                request_id = self.req_count
+                year_list=[self.now_year + i for i in range(1, load_years+1) if self.now_year + i <= self._meta_param.get('end_year', 2025)],
+                stock_pool=self._stock_pool_param.get('pool_type', 'test'),
+                request_id=self.req_count
             )
             load_message = LoadRequestMessage(
                 message_type='load_request',

@@ -2,19 +2,39 @@
 # 全局超参数，所有node一样  
 # 不同过超参数提供异质性  
 
-# 训练 
-train:
-  stock_pool: test # 使用测试池
+# 股票池与数据质量（已弃用顶层 train，改用 stock_pool + meta）
+stock_pool:
+  pool_type: test # 使用测试池
   data_quality_threshold: 0.8 # 数据质量阈值,即需要至少80%的非空值  
+
+# 节点meta数据配置  
+# 固定内容，由hyparam.yaml生成  
+# 随机内容，提供range，由node_manager随机生成  
+# 伴生内容，由其他模块提供
+meta_seed: 42 # meta全局种子 
+meta:
+  # task_id: 任务id,由uuid生成  
   start_year: 1997 # 开始年份
-  end_year: 2025 # 结束年份
-  # 默认最小粒度为月份，一次滚动一个月，提供一个月的因子数据和对应下一个月的收益数据  
-  
-# 评价指标计算  
-performance:
-  risk_free_rate: 0.015 # 无风险利率  
-
-
+  end_year: 2024 # 结束年份
+  # N: 50 # 总股票数量，由stock_pool.pool_type决定
+  # stock_list: [] # 股票列表， 由stock_pool.pool_type决定
+  #factors_list: [] # 因子列表，在节点硬编码  
+  earliest_year_month: (1997, 1) # 最早的年份和月份
+  train_config:  # 训练配置
+    seed_range: (1, 1000) # 随机种子范围
+    n: 10 # 一个组合中的证券数量（算上现金，共n+1个证券）
+    max_portfolios_num_range: (50,1000) # 对于总共n个证券，最多可以构建C(N,n)个组合,太大，所以设置最大组合数量
+    m_range: (1, 12) # 回看的期数
+    mask_len_range: (44, 88) # 因子掩码长度
+    model_config:
+      cate_type: [0,1,2,3,4] # 0表示mlp1, 1表示mlp2, 2表示mlp3
+      # config: {} # 模型具体参数, 根据cate_type选择
+    performance_config:
+      risk_free_rate: 0.015 # 无风险利率
+      rolling_window: 24 # 滚动窗口期数
+    reward_config:
+      # reward_weights: # 随机生成，保证权重为1
+        
 # service配置   
 # 主机的数据流水线服务配置，需要和node的配置契合  
 

@@ -7,6 +7,10 @@ class InitMessagePayload(TypedDict):
     """初始化消息"""
     pass 
 
+class StartMessagePayload(TypedDict):
+    """启动消息"""
+    pass 
+
 class LoadRequestPayload(TypedDict):
     """数据加载请求payload  
     year_list: List[str]  # [2023, 2024]
@@ -30,18 +34,6 @@ class TrainDataUpdatedPayload(TypedDict):
     """训练数据更新payload"""
     first:bool                  # 是否是第一次发布 
 
-class NodeHealthCheckPayload(TypedDict):
-    """节点健康检查payload"""
-    node_id: str
-    status: str                 # "healthy" | "unhealthy" | "offline"
-    metrics: Dict[str, float]   # {"cpu_usage": 45.2, "memory_usage": 67.8}
-
-class ServiceStatusUpdatePayload(TypedDict):
-    """服务状态更新payload"""
-    service_name: str
-    status: str                 # "running" | "stopped" | "error"
-    uptime: int                 # 运行时间(秒)
-    processed_requests: int     # 已处理请求数
 
 class ShutdownPayload(TypedDict, total=False):
     """关闭信号payload"""
@@ -57,6 +49,11 @@ class InitMessage(TypedDict):
     message_type: Literal['init']
     publisher: str
     payload: InitMessagePayload
+
+class StartMessage(TypedDict):
+    message_type: Literal['start']
+    publisher: str
+    payload: StartMessagePayload
 
 class LoadRequestMessage(TypedDict):
     """请求加载df"""
@@ -74,16 +71,6 @@ class TrainDataUpdatedMessage(TypedDict):
     publisher: str
     payload: TrainDataUpdatedPayload
 
-class NodeHealthCheckMessage(TypedDict):
-    message_type: Literal['node_health_check']
-    publisher: str
-    payload: NodeHealthCheckPayload
-
-class ServiceStatusUpdateMessage(TypedDict):
-    message_type: Literal['service_status_update']
-    publisher: str
-    payload: ServiceStatusUpdatePayload
-
 class ShutdownMessage(TypedDict):
     message_type: Literal['shutdown']
     publisher: str
@@ -98,8 +85,7 @@ Message = Union[
     LoadRequestMessage,
     DataLoadedMessage,
     TrainDataUpdatedMessage,
-    NodeHealthCheckMessage,
-    ServiceStatusUpdateMessage,
+    StartMessage,
     ShutdownMessage
 ]
 
@@ -109,8 +95,7 @@ MessageType = Literal[
     'init_data_loaded',
     'data_loaded',
     'train_data_updated',
-    'node_health_check',
-    'service_status_update',
+    'start',
     'shutdown',
     'all'
 ]

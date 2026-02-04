@@ -12,8 +12,7 @@ from src.manager.service.message import (
     LoadRequestMessage,
     DataLoadedMessage,
     TrainDataUpdatedMessage,
-    NodeHealthCheckMessage,
-    ServiceStatusUpdateMessage,
+    StartMessage,
     ShutdownMessage
 )
 
@@ -22,8 +21,6 @@ from src.manager.service.message import (
     LoadRequestMessage,
     DataLoadedMessage,
     TrainDataUpdatedMessage,
-    NodeHealthCheckMessage,
-    ServiceStatusUpdateMessage,
     ShutdownMessage,
 )
 
@@ -36,7 +33,6 @@ __all__ = [
     'LoadRequestMessage',
     'DataLoadedMessage',
     'TrainDataUpdatedMessage',
-    'NodeHealthCheckMessage',
-    'ServiceStatusUpdateMessage',
+    'StartMessage',
     'ShutdownMessage'
 ]
