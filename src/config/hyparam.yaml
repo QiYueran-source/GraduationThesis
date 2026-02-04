@@ -1,54 +1,52 @@
-# 超参数配置 
-# 全局超参数，所有node一样  
-# 不同过超参数提供异质性  
+# 超参数配置
+# 约定：顶层 = 固定（环境统一），train_config = 随机（agent 异质性）
 
-# 股票池与数据质量（已弃用顶层 train，改用 stock_pool + meta）
+# 股票池与数据质量
 stock_pool:
-  pool_type: test # 使用测试池
-  data_quality_threshold: 0.8 # 数据质量阈值,即需要至少80%的非空值  
+  pool_type: test
+  data_quality_threshold: 0.8
 
-# 节点meta数据配置  
-# 固定内容，由hyparam.yaml生成  
-# 随机内容，提供range，由node_manager随机生成  
-# 伴生内容，由其他模块提供
-meta_seed: 42 # meta全局种子 
+meta_seed: 42
+
+# 节点 meta：由主机提供
+# 【顶层 = 固定】
 meta:
-  # task_id: 任务id,由uuid生成  
-  start_year: 1997 # 开始年份
-  end_year: 2024 # 结束年份
-  # N: 50 # 总股票数量，由stock_pool.pool_type决定
-  # stock_list: [] # 股票列表， 由stock_pool.pool_type决定
-  #factors_list: [] # 因子列表，在节点硬编码  
-  earliest_year_month: (1997, 1) # 最早的年份和月份
-  train_config:  # 训练配置
-    seed_range: (1, 1000) # 随机种子范围
-    n: 10 # 一个组合中的证券数量（算上现金，共n+1个证券）
-    max_portfolios_num_range: (50,1000) # 对于总共n个证券，最多可以构建C(N,n)个组合,太大，所以设置最大组合数量
-    m_range: (1, 12) # 回看的期数
-    mask_len_range: (44, 88) # 因子掩码长度
+  start_year: 1997
+  end_year: 2024
+  earliest_year_month: [1997, 1]
+  n: 10
+  max_portfolios_num: 500
+  env_config:
+    rf_end_year: 2015   # 强化学习结束年份，月份默认 12
+  performance_config:
+    risk_free_rate: 0.015
+    rolling_window: 24
+
+  # 【train_config = 随机】下面为 range/选项，由 node_manager 随机采样
+  train_config:
+    seed_range: [1, 1000]
+    m_range: [1, 12]
+    mask_len_range: [44, 88]
     model_config:
-      cate_type: [0,1,2,3,4] # 0表示mlp1, 1表示mlp2, 2表示mlp3
-      # config: {} # 模型具体参数, 根据cate_type选择
-    performance_config:
-      risk_free_rate: 0.015 # 无风险利率
-      rolling_window: 24 # 滚动窗口期数
+      cate_type: [0]
+      dropout_range: [0.00, 0.25]
+      # config 按 cate 选择
+    reinforcement_config:
+      cate: [0]
+      lr_range: [1e-5, 1e-3]
+      clip_grad_norm_range: [0.5, 1.0]
+      weight_decay_range: [0, 0.01]
     reward_config:
-      # reward_weights: # 随机生成，保证权重为1
-        
-# service配置   
-# 主机的数据流水线服务配置，需要和node的配置契合  
+      # reward_weights: rtr / vol / sharpe / max_drawdown 随机生成且和为 1
 
-# redis数据冗余配置  
+# redis 数据冗余配置
 redis_redundancy:
-  interval: 5 # 检查间隔
-  min_periods_year: 1 # 冗余下限为 1年   
-  max_periods_year: 3 # 冗余上限为 3年   
+  interval: 5
+  min_periods_year: 1
+  max_periods_year: 3
 
-# redis数据过期配置  
+# redis 数据过期配置
 redis_expiration:
-  interval: 5 # 检查间隔
-  clean_up_threshold: 0.85 # 清理阈值，当85%的node访问过该数据后，启动倒计时  
-  clean_up_countdown: 300 # 倒计时300秒，倒计时结束后，删除数据   
-  
-  
-  
+  interval: 5
+  clean_up_threshold: 0.85
+  clean_up_countdown: 300

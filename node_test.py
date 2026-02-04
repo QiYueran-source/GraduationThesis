@@ -4,6 +4,7 @@ NodeManager 测试脚本
 - 生成 meta 列表（共享 task_id）
 - 可选：向节点下发任务启动
 """
+import uuid 
 import src.utils.set.set_pypath
 
 from src.manager.service.node_manager import NodeManager
@@ -28,7 +29,7 @@ def main():
     print(f"正在运行端口数: {len(running)}, 端口: {running}\n")
 
     # 4. 生成 meta 列表（共享 task_id）
-    task_id = "test_006"
+    task_id = "test" + str(uuid.uuid4())
     num = max(1, min(3, len(available)))  # 1~3 条，不超过可用端口数
     print(f"=== 4. generate_node_meta(num={num}, task_id={task_id}) ===")
     meta_list = nm.generate_node_meta(num=num, task_id=task_id)
@@ -37,7 +38,7 @@ def main():
         m = meta_list[0]
         print(f"首条 meta 键: {list(m.keys())}")
         print(f"  task_id: {m.get('task_id')}")
-        print(f"  start_year, end_year, end_month: {m.get('start_year')}, {m.get('end_year')}, {m.get('end_month')}")
+        print(f"  start_year, end_year: {m.get('start_year')}, {m.get('end_year')}")
         print(f"  N, len(stock_list): {m.get('N')}, {len(m.get('stock_list', []))}")
         print(f"  train_config 键: {list(m.get('train_config', {}).keys())}\n")
 

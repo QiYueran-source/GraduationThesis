@@ -213,10 +213,9 @@ class NodeManager:
         return (1997, 1)
 
     def _sample_train_config(self, tc: Dict[str, Any], rng: random.Random) -> Dict[str, Any]:
-        """根据 hyparam.meta.train_config 的 range 生成单条 train_config（Node 端格式）。"""
+        """根据 hyparam.meta.train_config 的 range 生成单条 train_config（Node 端格式）。仅含随机项：seed, m, mask_len, model_config, reinforcement_config, reward_config。"""
         out: Dict[str, Any] = {}
 
-        # 标量 range：(low, high) 取随机整数
         def sample_int_range(key: str) -> Optional[int]:
             r = tc.get(key)
             if r is None or not isinstance(r, (list, tuple)) or len(r) < 2:
@@ -226,10 +225,6 @@ class NodeManager:
         seed = sample_int_range('seed_range')
         if seed is not None:
             out['seed'] = seed
-        out['n'] = int(tc.get('n', 10))
-        max_p = sample_int_range('max_portfolios_num_range')
-        if max_p is not None:
-            out['max_portfolios_num'] = max_p
         m = sample_int_range('m_range')
         if m is not None:
             out['m'] = m
@@ -237,18 +232,44 @@ class NodeManager:
         if mask_len is not None:
             out['mask_len'] = mask_len
 
-        # model_config: cate_type 列表取一个作为 cate
+        def sample_float_range(d: Dict[str, Any], key: str) -> Optional[float]:
+            r = d.get(key)
+            if r is None or not isinstance(r, (list, tuple)) or len(r) < 2:
+                return None
+            return rng.uniform(float(r[0]), float(r[1]))
+
         model_cfg = tc.get('model_config') or {}
         cate_type = model_cfg.get('cate_type')
+        dropout = sample_float_range(model_cfg, 'dropout_range')
+        if dropout is None:
+            dropout = 0.0
         if isinstance(cate_type, list) and cate_type:
-            out['model_config'] = {'cate': rng.choice(cate_type), 'config': model_cfg.get('config', {})}
+            out['model_config'] = {'cate': rng.choice(cate_type), 'config': model_cfg.get('config', {}), 'dropout': dropout}
         else:
-            out['model_config'] = {'cate': 0, 'config': {}}
+            out['model_config'] = {'cate': 0, 'config': {}, 'dropout': dropout}
 
-        # performance_config: 原样拷贝
-        out['performance_config'] = dict(copy.deepcopy(tc.get('performance_config') or {}))
+        def sample_float_from(d: Dict[str, Any], key: str) -> Optional[float]:
+            r = d.get(key)
+            if r is None or not isinstance(r, (list, tuple)) or len(r) < 2:
+                return None
+            return rng.uniform(float(r[0]), float(r[1]))
 
-        # reward_weights: 四个正数归一化为和 1（rtr, vol, sharpe, max_drawdown）
+        rl_cfg = tc.get('reinforcement_config') or {}
+        rl_cate = rl_cfg.get('cate')
+        if isinstance(rl_cate, list) and rl_cate:
+            opt = {}
+            lr = sample_float_from(rl_cfg, 'lr_range') or rng.uniform(1e-5, 1e-3)
+            opt['lr'] = lr
+            clip = sample_float_from(rl_cfg, 'clip_grad_norm_range')
+            if clip is not None:
+                opt['clip_grad_norm'] = clip
+            wd = sample_float_from(rl_cfg, 'weight_decay_range')
+            if wd is not None:
+                opt['weight_decay'] = wd
+            out['reinforcement_config'] = {'cate': rng.choice(rl_cate), 'opt': opt}
+        else:
+            out['reinforcement_config'] = {'cate': 0, 'opt': {'lr': 1e-4}}
+
         keys = ['rtr', 'vol', 'sharpe', 'max_drawdown']
         raw = [rng.uniform(0.01, 1.0) for _ in keys]
         total = sum(raw)
@@ -256,42 +277,7 @@ class NodeManager:
         return out
 
     def generate_node_meta(self, num: int, task_id: str) -> List[Dict[str, Any]]:
-        """随机化生成节点meta数据，所有 meta 共享同一 task_id。
-        - 参数
-        num: 生成数量
-        task_id: 任务 id，由调用方传入，所有 meta 使用相同 task_id
-
-        - 返回
-        List[Dict]: 节点 meta 数据列表
-
-        固定/随机参数来源：self._meta_param、self._stock_pool_param（由 _load_config 从 hyparam.yaml 加载）。
-        meta 内容(其中 train_config 为随机，其余为固定):
-        - task_id: 任务 id（传入，所有 meta 相同）
-        - start_year: 开始年份  
-        - end_year: 停止年份（结束月份由节点默认 12 月）
-        - N: 总股票数量    
-        - stock_list: 股票列表   
-        - factors_list: 因子列表（避免麻烦，直接保存本地）   
-        - earliest_year_month: 最早的年份和月份,(year, month)  
-        - train_config: 训练配置   
-            - seed: 随机种子  
-            - n: 一个组合中的证券数量（算上现金，共n+1个证券）  
-            - max_portfolios_num: 对于总共n个证券，最多可以构建C(N,n)个组合,太大，所以设置最大组合数量    
-            - m: 回看的期数      
-            - mask_len: 因子掩码长度 
-            - model_config: 模型配置 
-                - cate: 0表示mlp1, 
-                - config: 模型具体参数
-            - performance_config: # 表现计算配置  
-                - risk_free_rate: 无风险利率   
-                - rolling_window: 滚动窗口期数  
-            - reward_config: 奖励配置   
-                - reward_weights: 奖励权重
-                    - rtr: 收益率权重   
-                    - vol: 波动权重   
-                    - sharpe: 夏普比率权重   
-                    - max_drawdown: 最大回测权重    
-        """
+        """随机化生成节点 meta，所有 meta 共享同一 task_id。约定：顶层 = 固定，train_config = 随机。"""
         if num <= 0:
             return []
 
@@ -302,6 +288,10 @@ class NodeManager:
         start_year = int(meta.get('start_year', 1997))
         end_year = int(meta.get('end_year', 2025))
         earliest_year_month = self._parse_earliest_year_month(meta.get('earliest_year_month', (1997, 1)))
+        n = int(meta.get('n', 10))
+        max_portfolios_num = int(meta.get('max_portfolios_num', 500))
+        env_config = dict(copy.deepcopy(meta.get('env_config') or {}))
+        performance_config = dict(copy.deepcopy(meta.get('performance_config') or {}))
         tc_template = meta.get('train_config') or {}
 
         rng = random.Random(self._meta_seed)
@@ -315,6 +305,11 @@ class NodeManager:
                 'N': N,
                 'stock_list': list(stock_list),
                 'earliest_year_month': list(earliest_year_month),
+                'n': n,
+                'max_portfolios_num': max_portfolios_num,
+                'env_config': env_config,
+                'performance_config': performance_config,
+                'factors_list': [],  # 不读取，由节点本地提供
                 'train_config': train_config,
             })
         logger.info(f"生成 {num} 条节点 meta，task_id: {task_id}")
