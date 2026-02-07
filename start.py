@@ -1,31 +1,27 @@
 """
 启动程序  
-0.创建一个任务目录，记录本次训练的过程  
-1.启动redis连接  
-2.访问节点 
-    - 读取节点配置  
-    - 尝试访问节点，看看实际能访问的数量  
-3.根据访问节点数量，生成若干agent配置，以json的格式保存本地  
-4.根据节点数量和agent配置，制定一个数据轮询方案，包括 
-    - 轮询的证券代码  
-    - 窗口大小  
-    - 时间步大小  
-    - 计数器设置  
-    等参数 
-5.启动轮询，将数据保存在redis中   
-6.发送agent配置到各个节点，并且启动agent训练   
-7.监控agent训练进度，并且收集agent每轮训练的结果，如决策值、决策收益、奖励等信息  
-8.训练结束，保存数据到本地，收尾    
 """
-import polars as pl
-x = pl.DataFrame(
-    {
-        'a':[1,2,3],'b':[2,3,4]
-    }
-)
-print(x.to_dicts())
+# 库
+import uuid  
+import time
+
+# 组件
+from src.manager.redis import REDIS_PREFIX_MANAGER, REDIS_CONNECTOR
+
+# 日志
+from src.utils.logger import get_module_logger
+logger = get_module_logger(__name__, "[START]")
+
+# 构建任务ID  
+def gen_task():
+    client = REDIS_CONNECTOR.get_client()
+    task_id = time.strftime("%Y%m%d_%H%M") + f"_{uuid.uuid4()}"
+    client.set(
+        name = REDIS_PREFIX_MANAGER.build_task_id_key(),
+        value = task_id
+    )
 
 
-import json 
-print(json.dumps(x.to_dicts()))
+    
+
 

@@ -33,7 +33,8 @@
 - n: 一个组合中的证券数量（算上现金，共 n+1 个证券）
 - max_portfolios_num: 对于总共 n 个证券，最多可构建组合数上限
 - env_config: 环境配置
-  - rf_end_year: 强化学习结束年份（后续年份不再学习但继续计算），月份默认 12
+  - rf_end_year: 强化学习结束年份（后续年份不再学习但继续计算），月份默认 12 
+  - truncate_step: 每 n 步截断一次并返回该 n 步奖励均值；0 表示仅窗口结束截断
 - performance_config: 表现计算配置
   - risk_free_rate: 无风险利率
   - rolling_window: 滚动窗口期数

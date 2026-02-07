@@ -14,13 +14,15 @@ meta:
   start_year: 1997
   end_year: 2024
   earliest_year_month: [1997, 1]
-  n: 10
-  max_portfolios_num: 500
+  n: 5
+  max_portfolios_num: 252
   env_config:
-    rf_end_year: 2015   # 强化学习结束年份，月份默认 12
+    rl_end_year: 2015   # 强化学习结束年份，月份默认 12
+    save_every_n_steps: 252     # 每 252 步保存一次模型
   performance_config:
     risk_free_rate: 0.015
     rolling_window: 24
+    std_window: 24
 
   # 【train_config = 随机】下面为 range/选项，由 node_manager 随机采样
   train_config:

@@ -19,7 +19,8 @@ from src.manager.service.bus import MESSAGE_BUS
 from src.manager.service.message import (
     Message,
     InitMessage,InitMessagePayload,
-    LoadRequestMessage,LoadRequestPayload
+    LoadRequestMessage,LoadRequestPayload,
+    WaitingMessage,WaitingPayload
 )
 
 # 日志
@@ -52,7 +53,7 @@ class DataRedundancyMonitor:
 
         # 线程管理 
         self._monitor_thread: Optional[threading.Thread] = None
-        self._lock = threading.Lock()  # 保护共享状
+        self._lock = threading.Lock()  # 保护共享状态
 
         # 初始化now_year（meta.start_year 的前一年，表示当前 redis 中最大数据片年份的前一年）
         self.now_year = self._meta_param.get('start_year', 1997) - 1
@@ -157,12 +158,20 @@ class DataRedundancyMonitor:
         - 检测当前的年份  
         - 如果 已有年份<=min，则加载 max-已有年份 的数据进入（发布加载事件）  
         - 年份前进 max-已有年份  
-        - 如果年份>最大年份，则发布结束事件  
+        - 如果年份>=最大年份，则发布 waiting 事件并启动等待线程
         - 发布加载事件后，设置等待=True,直到监听到更新成功事件后，才继续监控
         """
         count = 0 # 记录监控次数  
+        end_year = self._meta_param.get('end_year', 2025)
 
         while self.started:
+            # 检查是否到达 end_year
+            with self._lock:
+                if self.now_year >= end_year:
+                    logger.info(f'到达结束年份 end_year={end_year}, now_year={self.now_year}，发布 waiting 事件')
+                    self._publish_waiting()
+                    break  # 退出监控循环
+
             loaded_year_count = self._count_slice_year()
 
             # 如果数据充足，则静默等待（仅缺失数据时记录日志）
@@ -174,8 +183,16 @@ class DataRedundancyMonitor:
             # 如果不足，发布加载事件(次数为)
             load_years = self._redundancy_param.get('max_periods_year',2) - loaded_year_count
             self.req_count+=1 # req计数器+1
+            year_list = [self.now_year + i for i in range(1, load_years+1) if self.now_year + i <= end_year]
+            
+            # 如果 year_list 为空且 now_year >= end_year，触发 waiting
+            if not year_list and self.now_year >= end_year:
+                logger.info(f'year_list 为空且 now_year={self.now_year} >= end_year={end_year}，发布 waiting 事件')
+                self._publish_waiting()
+                break
+            
             payload = LoadRequestPayload(
-                year_list=[self.now_year + i for i in range(1, load_years+1) if self.now_year + i <= self._meta_param.get('end_year', 2025)],
+                year_list=year_list,
                 stock_pool=self._stock_pool_param.get('pool_type', 'test'),
                 request_id=self.req_count
             )
@@ -202,8 +219,38 @@ class DataRedundancyMonitor:
                     break 
                 
                 # 等待  
-                time.sleep(wait_interval) 
+                time.sleep(wait_interval)
 
+    def _publish_waiting(self):
+        """发布 waiting 事件（由 NodeManager 处理等待逻辑）"""
+        # 从 Redis 获取当前 task_id
+        try:
+            task_id_key = REDIS_PREFIX_MANAGER.build_task_id_key()
+            task_id = self.client.get(task_id_key)
+            if not task_id:
+                logger.error(f'无法从 Redis 获取 task_id (键: {task_id_key})')
+                task_id = 'unknown'
+        except Exception as e:
+            logger.error(f'获取 task_id 失败: {e}')
+            task_id = 'unknown'
+        
+        end_year = self._meta_param.get('end_year', 2025)
+        
+        # 构建并发布 WaitingMessage
+        payload = WaitingPayload(
+            task_id=task_id,
+            reason='reached_end_year',
+            end_year=end_year,
+            current_year=self.now_year
+        )
+        waiting_message = WaitingMessage(
+            message_type='waiting',
+            publisher=self.__class__.__name__,
+            payload=payload
+        )
+        
+        MESSAGE_BUS.publish(message=waiting_message)
+        logger.info(f'发布 waiting 事件: task_id={task_id}, reason=reached_end_year, end_year={end_year}, current_year={self.now_year}')
 
     def stop(self, timeout: float = 10.0) -> bool:
         """停止监控器

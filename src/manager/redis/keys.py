@@ -18,6 +18,7 @@ class RedisPrefixManager:
         f"""简化的Redis前缀管理器
         - 项目根前缀: gt project_prefix     
             - 系统前缀: gt:system system_prefix   
+                - 任务id: gt:system:task_id
                 - 消息队列键: gt:system:Q message_bus_queue_key   
                 - 节点总信息前缀: gt:system:node_info
             - 数据前缀: gt:data   
@@ -31,6 +32,7 @@ class RedisPrefixManager:
         self._project_prefix = 'gt'
         self._system_prefix = 'system'
         self._node_info_prefix = 'node_info'
+        self._task_id_prefix = 'task_id'
         self._data_prefix = 'data'
         self._init_data_prefix = 'init'
         self._load_data_prefix = 'load'
@@ -101,6 +103,14 @@ class RedisPrefixManager:
         例如: gt:system:node_info
         """
         return ":".join([self.system_prefix, self._node_info_prefix])
+
+    ## 构建ID键
+    def build_task_id_key(self) -> str:
+        """
+        构建task_id键  
+        例如 gt:system:task_id
+        """
+        return ":".join([self.system_prefix, self._task_id_prefix])
 
     ## 构建数据框键
     def build_df_key(self, 

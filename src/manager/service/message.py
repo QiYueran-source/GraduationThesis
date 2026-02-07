@@ -35,6 +35,13 @@ class TrainDataUpdatedPayload(TypedDict):
     first:bool                  # 是否是第一次发布 
 
 
+class WaitingPayload(TypedDict):
+    """等待节点完成payload"""
+    task_id: str                # 当前任务ID
+    reason: str                 # 等待原因（如 "reached_end_year"）
+    end_year: int               # 结束年份
+    current_year: int           # 当前年份
+
 class ShutdownPayload(TypedDict, total=False):
     """关闭信号payload"""
     reason: str                 # "maintenance" | "error" | "manual"
@@ -71,6 +78,11 @@ class TrainDataUpdatedMessage(TypedDict):
     publisher: str
     payload: TrainDataUpdatedPayload
 
+class WaitingMessage(TypedDict):
+    message_type: Literal['waiting']
+    publisher: str
+    payload: WaitingPayload
+
 class ShutdownMessage(TypedDict):
     message_type: Literal['shutdown']
     publisher: str
@@ -86,6 +98,7 @@ Message = Union[
     DataLoadedMessage,
     TrainDataUpdatedMessage,
     StartMessage,
+    WaitingMessage,
     ShutdownMessage
 ]
 
@@ -96,6 +109,7 @@ MessageType = Literal[
     'data_loaded',
     'train_data_updated',
     'start',
+    'waiting',
     'shutdown',
     'all'
 ]

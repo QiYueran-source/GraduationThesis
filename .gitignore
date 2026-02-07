@@ -50,3 +50,6 @@ llm/
 models/
 checkpoint/
 
+# 结果文件
+result/
+

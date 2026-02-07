@@ -16,6 +16,7 @@ import socket
 import requests
 import random
 import copy
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional, Dict, Any, Tuple
 
@@ -23,9 +24,13 @@ from typing import List, Optional, Dict, Any, Tuple
 from src.manager.service.message import (
     Message,
     InitMessage,StartMessage,
-    InitMessagePayload,StartMessagePayload
+    InitMessagePayload,StartMessagePayload,
+    WaitingMessage,WaitingPayload,
+    ShutdownMessage,ShutdownPayload
 )
 from src.manager.database import get_code_list
+from src.manager.service.bus import MESSAGE_BUS
+from src.manager.redis import REDIS_CONNECTOR, REDIS_PREFIX_MANAGER
 
 # 日志
 from src.utils.logger import get_module_logger
@@ -41,9 +46,22 @@ class NodeManager:
 
         # 线程管理
         self.monitor_started = False
+        self._monitor_thread: Optional[threading.Thread] = None
+        self._monitor_lock = threading.Lock()
+        
+        # 等待节点完成相关
+        self.waiting_for_nodes = False
+        self._waiting_thread: Optional[threading.Thread] = None
+        self._waiting_lock = threading.Lock()
+
+        # Redis 客户端
+        self._redis_client = REDIS_CONNECTOR.get_client()
 
         # 加载配置
         self._load_config()
+        
+        # 注册消息处理器
+        self._subscribe()
 
     def _load_config(self):
         """加载配置：node.yaml 为节点/端口配置，hyparam.yaml 为股票池与 meta 配置。"""
@@ -75,93 +93,70 @@ class NodeManager:
             logger.error(f"清空端口请求失败: {e}")
             return False
 
-    # ============================ 获取可用端口 ============================
-    def _get_single_available_port(
+    # ============================ 查询节点状态接口 ============================
+    def _get_single_node_status(
         self,
         host: str,
         port: int,
-        payload: bytes,
-        connect_timeout: float,
-    ) -> Optional[int]:
-        """单端口探测：TCP 连接并发送 {"req":0}，能收到合法 JSON 则返回 port，否则返回 None。无容器占用时连接失败，正常返回 None。"""
-        sock = None
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(connect_timeout)
-            sock.connect((host, port))
-            sock.sendall(payload)
-            sock.settimeout(connect_timeout)
-            data = sock.recv(4096).decode('utf-8', errors='replace').strip()
-            if not data:
-                return None
-            obj = json.loads(data)
-            return port if isinstance(obj, dict) else None
-        except (socket.timeout, socket.error, ConnectionRefusedError, ConnectionResetError, json.JSONDecodeError, OSError) as e:
-            logger.debug(f"端口 {port} 不可用（无容器或超时）: {e}")
-            return None
-        finally:
-            if sock is not None:
-                try:
-                    sock.close()
-                except OSError:
-                    pass
-
-    def get_available_ports(self) -> List[int]:
-        """对 port_range 内每个端口并发 TCP 探测（ThreadPoolExecutor），发送 {"req":0}，能收到合法 JSON 的端口视为可用并返回。无容器占用的端口会连接失败，自动跳过。"""
-        web = self._node_config.get('web', {})
-        host = web.get('node_host', 'localhost')
-        pr = web.get('port_range', [8191, 8220])
-        start_port = int(pr[0])
-        end_port = int(pr[1])
-        connect_timeout = float(web.get('timeout', 2.0))
-        max_workers = min(end_port - start_port + 1, web.get('max_worker', 32))
+        connect_timeout: float = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        查询单个节点状态（基础方法）
+        
+        通过 TCP 连接发送 {"req": 0} 查询节点状态，返回完整的状态字典。
+        
+        Args:
+            host: 节点主机地址
+            port: 节点端口
+            connect_timeout: 连接超时时间（秒），默认从配置读取
+        
+        Returns:
+            Optional[Dict[str, Any]]: 节点状态字典，包含：
+                - running: int (0/1) 是否正在运行
+                - current_year_month: List[int] 或 Tuple[int, int] 当前窗口(year, month)
+                - pid: int 进程号
+                - node_id: str 节点id (从 frp 状态文件中获取)
+            如果连接失败、超时或解析失败，返回 None
+        """
+        if connect_timeout is None:
+            web = self._node_config.get('web', {})
+            connect_timeout = float(web.get('timeout', 2.0))
+        
         payload = json.dumps({"req": 0}).encode('utf-8')
-        total = end_port - start_port + 1
-
-        available: List[int] = []
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(self._get_single_available_port, host, port, payload, connect_timeout): port
-                for port in range(start_port, end_port + 1)
-            }
-            for future in as_completed(futures):
-                try:
-                    result = future.result()
-                    if result is not None:
-                        available.append(result)
-                except Exception as e:
-                    port = futures.get(future)
-                    logger.debug(f"端口 {port} 探测异常: {e}")
-
-        available.sort()
-        logger.info(f"可用端口数: {len(available)}/{total}, 端口: {available}")
-        return available
-
-    # ============================ 获取正在运行的端口 ============================
-    def _get_single_running_port(
-        self,
-        host: str,
-        port: int,
-        payload: bytes,
-        connect_timeout: float,
-    ) -> Optional[int]:
-        """单端口探测：TCP 发 {"req":0}，若响应为合法 JSON 且 running==1 则返回 port，否则返回 None。"""
         sock = None
+        
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(connect_timeout)
             sock.connect((host, port))
             sock.sendall(payload)
             sock.settimeout(connect_timeout)
+            
+            # 接收响应数据
             data = sock.recv(4096).decode('utf-8', errors='replace').strip()
             if not data:
+                logger.debug(f"端口 {port} 返回空响应")
                 return None
-            obj = json.loads(data)
-            if isinstance(obj, dict) and obj.get("running") == 1:
-                return port
+            
+            # 解析 JSON
+            status = json.loads(data)
+            if not isinstance(status, dict):
+                logger.debug(f"端口 {port} 返回非字典格式: {type(status)}")
+                return None
+            
+            # 验证必要字段（可选，根据实际需求调整）
+            # 如果节点返回的格式固定，可以在这里做校验
+            
+            return status
+            
+        except (socket.timeout, socket.error, ConnectionRefusedError, ConnectionResetError) as e:
+            logger.debug(f"端口 {port} 连接失败: {e}")
             return None
-        except (socket.timeout, socket.error, ConnectionRefusedError, ConnectionResetError, json.JSONDecodeError, OSError) as e:
-            logger.debug(f"端口 {port} 未在运行或不可达: {e}")
+        except json.JSONDecodeError as e:
+            logger.debug(f"端口 {port} JSON 解析失败: {e}")
+            return None
+        except OSError as e:
+            logger.debug(f"端口 {port} 系统错误: {e}")
             return None
         finally:
             if sock is not None:
@@ -170,8 +165,15 @@ class NodeManager:
                 except OSError:
                     pass
     
-    def get_running_ports(self) -> List[int]:
-        """对 port_range 内每个端口并发发 req=0，响应中 running==1 的端口视为正在运行并返回。"""
+    def get_all_status(self) -> Dict[int, Dict[str, Any]]:
+        """
+        获取所有节点的完整状态
+        
+        Returns:
+            Dict[int, Dict[str, Any]]: 端口到状态字典的映射
+                键为端口号，值为节点状态字典（包含 running, current_year_month, pid, node_id）
+                如果节点不可用，则不会出现在字典中
+        """
         web = self._node_config.get('web', {})
         host = web.get('node_host', 'localhost')
         pr = web.get('port_range', [8191, 8220])
@@ -179,26 +181,65 @@ class NodeManager:
         end_port = int(pr[1])
         connect_timeout = float(web.get('timeout', 2.0))
         max_workers = min(end_port - start_port + 1, web.get('max_worker', 32))
-        payload = json.dumps({"req": 0}).encode('utf-8')
-
-        running: List[int] = []
+        
+        all_status: Dict[int, Dict[str, Any]] = {}
+        
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
-                executor.submit(self._get_single_running_port, host, port, payload, connect_timeout): port
+                executor.submit(self._get_single_node_status, host, port, connect_timeout): port
                 for port in range(start_port, end_port + 1)
             }
             for future in as_completed(futures):
                 try:
-                    result = future.result()
-                    if result is not None:
-                        running.append(result)
+                    status = future.result()
+                    port = futures.get(future)
+                    if status is not None:
+                        all_status[port] = status
                 except Exception as e:
                     port = futures.get(future)
-                    logger.debug(f"端口 {port} 探测异常: {e}")
+                    logger.debug(f"端口 {port} 查询状态异常: {e}")
+        
+        logger.info(f"成功查询 {len(all_status)} 个节点的状态")
+        return all_status
 
-        running.sort()
-        logger.info(f"正在运行的端口数: {len(running)}, 端口: {running}")
-        return running
+    def get_all_available_port(self) -> List[str]:
+        """
+        获取所有可用端口（能连接且返回合法状态）
+        
+        Returns:
+            List[str]: 可用端口列表（字符串格式）
+        """
+        all_status = self.get_all_status()
+        available_ports = [str(port) for port in sorted(all_status.keys())]
+        logger.info(f"可用端口数: {len(available_ports)}, 端口: {available_ports}")
+        return available_ports
+
+    def get_all_running_task_port(self, task_id: str) -> List[str]:
+        """
+        获取运行指定 task_id 的所有端口
+        
+        Args:
+            task_id: 任务ID
+        
+        Returns:
+            List[str]: 运行指定 task_id 的端口列表（字符串格式）
+        """
+        all_status = self.get_all_status()
+        running_ports: List[str] = []
+        
+        for port, status in all_status.items():
+            # 检查是否在运行
+            if status.get('running') == 1:
+                # 如果状态中包含 task_id，可以进一步过滤
+                # 如果状态中没有 task_id，则所有 running==1 的节点都返回
+                # 根据实际需求调整
+                status_task_id = status.get('task_id')
+                if status_task_id is None or status_task_id == task_id:
+                    running_ports.append(str(port))
+        
+        running_ports.sort(key=int)  # 按端口号排序
+        logger.info(f"运行 task_id={task_id} 的端口数: {len(running_ports)}, 端口: {running_ports}")
+        return running_ports 
 
     # ============================ 随机化生成节点meta数据 ============================
     def _parse_earliest_year_month(self, val: Any) -> Tuple[int, int]:
@@ -354,14 +395,16 @@ class NodeManager:
 
     def start_nodes(self, meta_list: List[Dict[str, Any]]) -> Tuple[int, int]:
         """按可用端口顺序向各节点下发 meta 启动任务。
-        - 先 get_available_ports()，取前 len(meta_list) 个端口与 meta_list 一一对应下发。
+        - 先 get_all_available_port()，取前 len(meta_list) 个端口与 meta_list 一一对应下发。
         - 返回 (成功数, 失败数)。
         """
         if not meta_list:
             return 0, 0
         web = self._node_config.get('web', {})
         host = web.get('node_host', 'localhost')
-        available = self.get_available_ports()
+        available_str = self.get_all_available_port()  # 返回字符串列表
+        # 转换为整数列表
+        available = [int(port) for port in available_str]
         if len(available) < len(meta_list):
             logger.warning(f"可用端口数 {len(available)} 小于 meta 数 {len(meta_list)}，仅启动前 {len(available)} 个节点")
         ports = available[: len(meta_list)]
@@ -374,6 +417,310 @@ class NodeManager:
         logger.info(f"节点启动完成: 成功 {ok}, 失败 {fail}, 共 {len(meta_list)} 条 meta")
         return ok, fail
 
+    # ============================ 停止节点 ============================
+    def _send_stop_to_node(self, host: str, port: int) -> Dict[str, Any]:
+        """向单个节点发送 req=-1 停止命令，TCP 发送 {"req": -1}，返回节点 JSON 响应。"""
+        web = self._node_config.get('web', {})
+        connect_timeout = float(web.get('timeout', 10))
+        payload = json.dumps({"req": -1}).encode('utf-8')
+        sock = None
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(connect_timeout)
+            sock.connect((host, port))
+            sock.sendall(payload)
+            sock.settimeout(connect_timeout)
+            data = sock.recv(8192).decode('utf-8', errors='replace').strip()
+            if not data:
+                return {"error": "empty response"}
+            return json.loads(data)
+        except (socket.timeout, socket.error, ConnectionRefusedError, ConnectionResetError, json.JSONDecodeError, OSError) as e:
+            logger.debug(f"端口 {port} 发送停止命令失败: {e}")
+            return {"error": str(e)}
+        finally:
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+
+    def stop_single_node(self, port: int) -> bool:
+        """停止单个节点
+        
+        Args:
+            port: 节点端口号
+        
+        Returns:
+            bool: 停止成功返回 True，否则返回 False
+        """
+        web = self._node_config.get('web', {})
+        host = web.get('node_host', 'localhost')
+        
+        resp = self._send_stop_to_node(host, port)
+        if isinstance(resp, dict) and resp.get("stop") == "success":
+            logger.info(f"节点 {host}:{port} 停止成功")
+            return True
+        err = resp.get("error", resp) if isinstance(resp, dict) else resp
+        logger.warning(f"节点 {host}:{port} 停止失败: {err}")
+        return False
+
+    def stop_nodes_by_task_id(self, task_id: str) -> Tuple[int, int]:
+        """停止所有运行指定 task_id 的节点
+        
+        Args:
+            task_id: 任务ID
+        
+        Returns:
+            Tuple[int, int]: (成功数, 失败数)
+        """
+        # 获取运行该 task_id 的所有端口
+        running_ports_str = self.get_all_running_task_port(task_id)
+        if not running_ports_str:
+            logger.info(f"没有运行 task_id={task_id} 的节点")
+            return 0, 0
+        
+        running_ports = [int(port) for port in running_ports_str]
+        logger.info(f"准备停止 {len(running_ports)} 个运行 task_id={task_id} 的节点，端口: {running_ports}")
+        
+        ok, fail = 0, 0
+        for port in running_ports:
+            if self.stop_single_node(port):
+                ok += 1
+            else:
+                fail += 1
+        
+        logger.info(f"节点停止完成: 成功 {ok}, 失败 {fail}, 共 {len(running_ports)} 个节点")
+        return ok, fail
+
+    # =========================== 节点监控线程 =================================
+    def _monitor_loop(self):
+        """
+        节点监控循环
+        - 每 interval 秒查询所有节点状态
+        - 统计每个 task_id 的节点数量和详细信息
+        - 保存到 Redis (gt:system:node_info)
+        """
+        monitor_config = self._node_config.get('monitor', {})
+        interval = float(monitor_config.get('interval', 120))
+        
+        logger.info(f"节点监控器启动，监控间隔: {interval} 秒")
+        
+        while self.monitor_started:
+            try:
+                # 获取所有节点状态
+                all_status = self.get_all_status()
+                
+                # 按 task_id 分组统计
+                task_nodes: Dict[str, List[Dict[str, Any]]] = {}
+                total_running = 0
+                
+                for port, status in all_status.items():
+                    if status.get('running') == 1:
+                        total_running += 1
+                        task_id = status.get('task_id')
+                        if task_id:
+                            if task_id not in task_nodes:
+                                task_nodes[task_id] = []
+                            # 保存节点详细信息
+                            node_info = {
+                                'port': port,
+                                'node_id': status.get('node_id'),
+                                'pid': status.get('pid'),
+                                'current_year_month': status.get('current_year_month'),
+                            }
+                            task_nodes[task_id].append(node_info)
+                
+                # 保存到 Redis
+                node_info_key = REDIS_PREFIX_MANAGER.build_node_info_key()
+                
+                # 构建要保存的数据
+                node_info_data = {
+                    'node_num': str(total_running),
+                    'last_update': str(int(time.time())),
+                }
+                
+                # 为每个 task_id 保存节点信息（JSON 格式）
+                for task_id, nodes in task_nodes.items():
+                    node_info_data[f'task_{task_id}_count'] = str(len(nodes))
+                    node_info_data[f'task_{task_id}_nodes'] = json.dumps(nodes, ensure_ascii=False)
+                
+                # 使用 hset 批量设置（如果支持）或逐个设置
+                if node_info_data:
+                    self._redis_client.hset(node_info_key, mapping=node_info_data)
+                    logger.info(
+                        f"节点监控更新: 总运行节点数={total_running}, "
+                        f"task_id数量={len(task_nodes)}, "
+                        f"task_ids={list(task_nodes.keys())}"
+                    )
+                else:
+                    # 如果没有运行节点，只更新 node_num 为 0
+                    self._redis_client.hset(node_info_key, 'node_num', '0')
+                    self._redis_client.hset(node_info_key, 'last_update', str(int(time.time())))
+                    logger.info("节点监控更新: 无运行节点")
+                
+            except Exception as e:
+                logger.error(f"节点监控循环异常: {e}", exc_info=True)
+            
+            # 等待 interval 秒后继续下一次监控
+            if self.monitor_started:
+                time.sleep(interval)
+
+    def start_monitor(self):
+        """启动节点监控器"""
+        with self._monitor_lock:
+            if self.monitor_started:
+                logger.warning('节点监控器已经启动')
+                return
+            
+            self.monitor_started = True
+            
+            # 创建并启动监控线程
+            self._monitor_thread = threading.Thread(
+                target=self._monitor_loop,
+                name="NodeMonitor",
+                daemon=True
+            )
+            self._monitor_thread.start()
+            logger.info('节点监控器已启动')
+
+    def stop_monitor(self, timeout: float = 10.0) -> bool:
+        """停止节点监控器
+        
+        Args:
+            timeout: 等待线程结束的超时时间（秒）
+            
+        Returns:
+            bool: 是否成功停止
+        """
+        with self._monitor_lock:
+            if not self.monitor_started:
+                logger.warning('节点监控器未启动')
+                return True
+            
+            self.monitor_started = False
+        
+        # 等待监控线程结束
+        if self._monitor_thread and self._monitor_thread.is_alive():
+            logger.info(f'等待监控线程结束（超时: {timeout}秒）...')
+            self._monitor_thread.join(timeout=timeout)
+            
+            if self._monitor_thread.is_alive():
+                logger.warning(f'监控线程未能在{timeout}秒内停止')
+                return False
+            else:
+                logger.info('监控线程已成功停止')
+        
+        # 停止等待线程
+        with self._waiting_lock:
+            self.waiting_for_nodes = False
+        
+        if self._waiting_thread and self._waiting_thread.is_alive():
+            logger.info(f'等待 waiting 线程结束（超时: {timeout}秒）...')
+            self._waiting_thread.join(timeout=timeout)
+            
+            if self._waiting_thread.is_alive():
+                logger.warning(f'waiting 线程未能在{timeout}秒内停止')
+            else:
+                logger.info('waiting 线程已成功停止')
+        
+        with self._monitor_lock:
+            self._monitor_thread = None
+        
+        with self._waiting_lock:
+            self._waiting_thread = None
+        
+        logger.info('节点监控器已完全停止')
+        return True
+
+    # ============================ 等待节点完成 ============================
+    def _waiting_loop(self, task_id: str):
+        """等待所有运行指定 task_id 的节点完成
+        
+        Args:
+            task_id: 任务ID
+        """
+        check_interval = 30  # 检查间隔（秒）
+        max_wait_time = 7200  # 最大等待时间（2小时）
+        start_wait_time = time.time()
+        
+        logger.info(f'开始等待 task_id={task_id} 的所有节点完成')
+        
+        while self.waiting_for_nodes:
+            try:
+                # 检查是否超时
+                elapsed_time = time.time() - start_wait_time
+                if elapsed_time > max_wait_time:
+                    logger.warning(f'等待节点完成超时（{max_wait_time}秒），task_id={task_id}')
+                    break
+                
+                # 获取运行该 task_id 的节点
+                running_ports = self.get_all_running_task_port(task_id)
+                
+                if len(running_ports) == 0:
+                    logger.info(f'所有运行 task_id={task_id} 的节点已完成')
+                    # 发布 shutdown 事件
+                    self._publish_shutdown()
+                    break
+                else:
+                    logger.info(f'仍有 {len(running_ports)} 个节点在运行 task_id={task_id}，端口: {running_ports}')
+                
+                # 等待一段时间后继续检查
+                time.sleep(check_interval)
+                
+            except Exception as e:
+                logger.error(f'等待循环异常: {e}', exc_info=True)
+                time.sleep(check_interval)
+        
+        logger.info(f'等待线程结束，task_id={task_id}')
+
+    def _publish_shutdown(self):
+        """发布 shutdown 事件"""
+        payload = ShutdownPayload(
+            reason='reached_end_year',
+            graceful=True,
+            timeout=300  # 5分钟超时
+        )
+        shutdown_message = ShutdownMessage(
+            message_type='shutdown',
+            publisher=self.__class__.__name__,
+            payload=payload
+        )
+        
+        MESSAGE_BUS.publish(message=shutdown_message)
+        logger.info(f'发布 shutdown 事件: reason=reached_end_year, graceful=True')
+
+    def waiting_handler(self, message: Message):
+        """处理 waiting 消息，启动等待线程
+        
+        Args:
+            message: WaitingMessage
+        """
+        payload = message.get('payload', {})
+        task_id = payload.get('task_id', 'unknown')
+        reason = payload.get('reason', 'unknown')
+        end_year = payload.get('end_year', 0)
+        current_year = payload.get('current_year', 0)
+        
+        logger.info(f'收到 waiting 消息: task_id={task_id}, reason={reason}, end_year={end_year}, current_year={current_year}')
+        
+        with self._waiting_lock:
+            # 避免重复启动
+            if self.waiting_for_nodes:
+                logger.warning('等待线程已启动，跳过重复启动')
+                return
+            
+            self.waiting_for_nodes = True
+        
+        # 启动等待线程
+        self._waiting_thread = threading.Thread(
+            target=self._waiting_loop,
+            args=(task_id,),
+            name="WaitingForNodes",
+            daemon=True
+        )
+        self._waiting_thread.start()
+        logger.info(f'等待线程已启动，等待 task_id={task_id} 的所有节点完成')
+
     # ============================ 初始化消息handler ============================
     def init_handler(self, message:Message):
         """初始化消息handler
@@ -381,6 +728,10 @@ class NodeManager:
         2.input = y 后，发布start事件  
         """
         logger.info(f"开始初始化")
+
+    def _subscribe(self):
+        """订阅消息处理器"""
+        MESSAGE_BUS.subscribe('waiting', self.waiting_handler, 'NodeManager')
 
         
     
