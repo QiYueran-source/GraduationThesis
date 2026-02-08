@@ -85,12 +85,12 @@ class ConnectionMonitor:
             raise RedisConfigurationException(f"加载配置失败: {e}")
 
     def _monitor_loop(self):
-        """监控循环 - 更完善的实现"""
+        """监控循环 - 更完善的实现，支持快速停止"""
         # 获取配置
         interval = self._config.get('interval', 30)
         max_consecutive_failures = self._config.get('max_consecutive_failures', 5)  # 最大连续失败次数
-        
-        # 失败计数 
+
+        # 失败计数
         consecutive_failures = 0
 
         # 监控循环
@@ -102,30 +102,31 @@ class ConnectionMonitor:
                 # 根据检查结果处理
                 if self.metrics.is_connected:
                     consecutive_failures = 0  # 重置失败计数
-                    
+
                     # 连接正常时的额外处理
                     self._handle_healthy_connection()
                 else:
                     consecutive_failures += 1
-                    
+
                     # 连接异常时的处理
                     self._handle_connection_failure(consecutive_failures)
-                    
-                    # 如果连续失败太多，增加检查间隔
+
+                    # 如果连续失败太多，增加检查间隔（分段sleep）
                     if consecutive_failures >= max_consecutive_failures:
-                        time.sleep(interval * 2)  # 增加检查间隔
+                        extended_interval = interval * 2
+                        self._interruptible_sleep(extended_interval)
                         continue
-                
-                # 正常检查间隔
-                time.sleep(interval)
-                
+
+                # 正常检查间隔（分段sleep，便于快速停止）
+                self._interruptible_sleep(interval)
+
             except Exception as e:
                 # 监控过程本身的异常
                 consecutive_failures += 1
                 logger.error(f"监控循环异常: {e}")
-                
+
                 # 防止监控异常导致CPU占用过高
-                time.sleep(min(interval, 5))
+                self._interruptible_sleep(min(interval, 5))
 
     def _start_monitor_thread(self):
         """启动监控线程"""
@@ -211,18 +212,21 @@ class ConnectionMonitor:
         logger.info(f"Metrics日志记录已启动，间隔{log_interval}秒")
     
     def _log_metrics_loop(self):
-        """metrics日志记录循环"""
+        """metrics日志记录循环，支持快速停止"""
         # 获取配置
         log_interval = self._config.get('metrics_logging_interval', 600)
 
-        # 日志记录循环
-        while True:
+        # 日志记录循环 - 检查停止标志
+        while self._logging:
             try:
                 self._log_current_metrics()
-                time.sleep(log_interval)
+                # 分段sleep，便于快速停止
+                self._interruptible_sleep(log_interval)
             except Exception as e:
                 logger.error(f"Metrics日志记录异常: {e}")
-                time.sleep(10)  # 出错后等待10秒再试
+                # 出错后等待，但也要检查停止标志
+                if self._logging:
+                    self._interruptible_sleep(10)  # 出错后等待10秒再试
     
     def _log_current_metrics(self):
         """记录当前metrics到日志"""
@@ -251,11 +255,21 @@ class ConnectionMonitor:
         # 记录详细metrics（debug级别）
         logger.debug(f"[METRICS_DETAIL] {metrics_dict}")
     
+    def _interruptible_sleep(self, duration: float):
+        """可中断的sleep，便于快速响应停止信号"""
+        sleep_step = 1.0  # 每秒检查一次停止标志
+        elapsed = 0.0
+
+        while elapsed < duration and (self._monitoring or self._logging):
+            remaining = min(sleep_step, duration - elapsed)
+            time.sleep(remaining)
+            elapsed += remaining
+
     def _stop_log_thread(self):
         """停止日志记录线程"""
         # 设置停止标志（需要添加self._log_enabled = False）
         self._logging = False
-        
+
         if self._log_thread and self._log_thread.is_alive():
             self._log_thread.join(timeout=2.0)
             if self._log_thread.is_alive():

@@ -18,9 +18,8 @@ from src.manager.redis import REDIS_PREFIX_MANAGER
 from src.manager.service.bus import MESSAGE_BUS 
 from src.manager.service.message import (
     Message,
-    InitMessage,InitMessagePayload,
-    LoadRequestMessage,LoadRequestPayload,
-    WaitingMessage,WaitingPayload
+    StartMessage, StartMessagePayload,
+    LoadRequestMessage, LoadRequestPayload,
 )
 
 # 日志
@@ -165,12 +164,11 @@ class DataRedundancyMonitor:
         end_year = self._meta_param.get('end_year', 2025)
 
         while self.started:
-            # 检查是否到达 end_year
+            # 检查是否到达 end_year（仅退出监控循环，waiting 改由 NodeManager init_handler 发布）
             with self._lock:
                 if self.now_year >= end_year:
-                    logger.info(f'到达结束年份 end_year={end_year}, now_year={self.now_year}，发布 waiting 事件')
-                    self._publish_waiting()
-                    break  # 退出监控循环
+                    logger.info(f'到达结束年份 end_year={end_year}, now_year={self.now_year}，退出监控循环')
+                    break
 
             loaded_year_count = self._count_slice_year()
 
@@ -185,12 +183,11 @@ class DataRedundancyMonitor:
             self.req_count+=1 # req计数器+1
             year_list = [self.now_year + i for i in range(1, load_years+1) if self.now_year + i <= end_year]
             
-            # 如果 year_list 为空且 now_year >= end_year，触发 waiting
+            # 如果 year_list 为空且 now_year >= end_year，退出监控循环
             if not year_list and self.now_year >= end_year:
-                logger.info(f'year_list 为空且 now_year={self.now_year} >= end_year={end_year}，发布 waiting 事件')
-                self._publish_waiting()
+                logger.info(f'year_list 为空且 now_year={self.now_year} >= end_year={end_year}，退出监控循环')
                 break
-            
+
             payload = LoadRequestPayload(
                 year_list=year_list,
                 stock_pool=self._stock_pool_param.get('pool_type', 'test'),
@@ -220,37 +217,6 @@ class DataRedundancyMonitor:
                 
                 # 等待  
                 time.sleep(wait_interval)
-
-    def _publish_waiting(self):
-        """发布 waiting 事件（由 NodeManager 处理等待逻辑）"""
-        # 从 Redis 获取当前 task_id
-        try:
-            task_id_key = REDIS_PREFIX_MANAGER.build_task_id_key()
-            task_id = self.client.get(task_id_key)
-            if not task_id:
-                logger.error(f'无法从 Redis 获取 task_id (键: {task_id_key})')
-                task_id = 'unknown'
-        except Exception as e:
-            logger.error(f'获取 task_id 失败: {e}')
-            task_id = 'unknown'
-        
-        end_year = self._meta_param.get('end_year', 2025)
-        
-        # 构建并发布 WaitingMessage
-        payload = WaitingPayload(
-            task_id=task_id,
-            reason='reached_end_year',
-            end_year=end_year,
-            current_year=self.now_year
-        )
-        waiting_message = WaitingMessage(
-            message_type='waiting',
-            publisher=self.__class__.__name__,
-            payload=payload
-        )
-        
-        MESSAGE_BUS.publish(message=waiting_message)
-        logger.info(f'发布 waiting 事件: task_id={task_id}, reason=reached_end_year, end_year={end_year}, current_year={self.now_year}')
 
     def stop(self, timeout: float = 10.0) -> bool:
         """停止监控器
@@ -313,8 +279,8 @@ class DataRedundancyMonitor:
                     logger.error(f'收到未来的更新消息，req_id: {request_id}，当前等待: {self.req_count}，异常')
                     raise 
     
-    def init_handler(self,message:Message):
-        """注册初始化事件  
+    def start_handler(self,message:Message):
+        """注册启动事件  
         - 启动冗余监控器  
         """
         self.start()
@@ -326,7 +292,7 @@ class DataRedundancyMonitor:
         self.stop()
 
     def _subscribe(self):
-        MESSAGE_BUS.subscribe('init',self.init_handler,'DataRedundancyMonitor')
+        MESSAGE_BUS.subscribe('start',self.start_handler,'DataRedundancyMonitor')
         MESSAGE_BUS.subscribe('data_loaded',self.data_loaded_handler,'DataRedundancyMonitor')
         MESSAGE_BUS.subscribe('shutdown',self.shutdown_handler,'DataRedundancyMonitor')
 

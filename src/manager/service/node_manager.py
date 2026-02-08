@@ -23,8 +23,7 @@ from typing import List, Optional, Dict, Any, Tuple
 # 组件
 from src.manager.service.message import (
     Message,
-    InitMessage,StartMessage,
-    InitMessagePayload,StartMessagePayload,
+    StartMessage,StartMessagePayload,
     WaitingMessage,WaitingPayload,
     ShutdownMessage,ShutdownPayload
 )
@@ -135,28 +134,16 @@ class NodeManager:
             # 接收响应数据
             data = sock.recv(4096).decode('utf-8', errors='replace').strip()
             if not data:
-                logger.debug(f"端口 {port} 返回空响应")
                 return None
             
             # 解析 JSON
             status = json.loads(data)
             if not isinstance(status, dict):
-                logger.debug(f"端口 {port} 返回非字典格式: {type(status)}")
                 return None
-            
-            # 验证必要字段（可选，根据实际需求调整）
-            # 如果节点返回的格式固定，可以在这里做校验
             
             return status
             
-        except (socket.timeout, socket.error, ConnectionRefusedError, ConnectionResetError) as e:
-            logger.debug(f"端口 {port} 连接失败: {e}")
-            return None
-        except json.JSONDecodeError as e:
-            logger.debug(f"端口 {port} JSON 解析失败: {e}")
-            return None
-        except OSError as e:
-            logger.debug(f"端口 {port} 系统错误: {e}")
+        except (socket.timeout, socket.error, ConnectionRefusedError, ConnectionResetError, json.JSONDecodeError, OSError):
             return None
         finally:
             if sock is not None:
@@ -195,10 +182,12 @@ class NodeManager:
                     port = futures.get(future)
                     if status is not None:
                         all_status[port] = status
-                except Exception as e:
+                except Exception:
                     port = futures.get(future)
-                    logger.debug(f"端口 {port} 查询状态异常: {e}")
-        
+                    pass  # 单端口异常不逐条打日志，下面统一汇总
+        failed_ports = set(range(start_port, end_port + 1)) - set(all_status.keys())
+        if failed_ports:
+            logger.debug(f"以下 {len(failed_ports)} 个端口不可用: {sorted(failed_ports)}")
         logger.info(f"成功查询 {len(all_status)} 个节点的状态")
         return all_status
 
@@ -721,17 +710,90 @@ class NodeManager:
         self._waiting_thread.start()
         logger.info(f'等待线程已启动，等待 task_id={task_id} 的所有节点完成')
 
-    # ============================ 初始化消息handler ============================
-    def init_handler(self, message:Message):
-        """初始化消息handler
-        1.清理端口  
-        2.input = y 后，发布start事件  
-        """
-        logger.info(f"开始初始化")
+    # ============================ init / start 消息handler ============================
+    def init_handler(self, message: Message):
+        """处理 init：发布 start，等待 30s 后获取可用端口、生成 meta 并启动所有节点。"""
+        logger.info("收到 init 消息：发布 start，30s 后启动节点")
+
+        # 预先写入node_num 
+        node_info_key = REDIS_PREFIX_MANAGER.build_node_info_key()
+        port_range = self._node_config.get('web',{}).get('port_range', [8191, 8220])
+        port_num = port_range[1] - port_range[0] + 1
+        self._redis_client.hset(
+            node_info_key,
+            {
+                'node_num': port_num
+            }
+        )
+        logger.debug(f"预先写入node_num: {port_num}")
+        
+        # 发布 start（DataRedundancyMonitor 等据此启动）
+        start_msg = StartMessage(
+            message_type='start',
+            publisher=self.__class__.__name__,
+            payload=StartMessagePayload()
+        )
+        MESSAGE_BUS.publish(message=start_msg)
+        
+        # 等待 30s
+        time.sleep(30)
+        
+        # 从 Redis 获取 task_id
+        task_id_key = REDIS_PREFIX_MANAGER.build_task_id_key()
+        task_id_raw = self._redis_client.get(task_id_key)
+        if task_id_raw is None:
+            logger.error("Redis 中无 task_id，跳过启动节点")
+            return
+        task_id = task_id_raw.decode('utf-8') if isinstance(task_id_raw, bytes) else str(task_id_raw)
+        
+        # 获取可用端口并启动节点
+        available = self.get_all_available_port()
+        num = len(available)
+        if num == 0:
+            logger.warning("无可用端口，跳过启动节点")
+            return
+        meta_list = self.generate_node_meta(num=num, task_id=task_id)
+        ok, fail = self.start_nodes(meta_list)
+        logger.info(f"init_handler 完成：已启动节点 成功={ok}, 失败={fail}")
+
+        # 发布 waiting，由本模块 waiting_handler 启动等待线程，等所有节点结束后发 shutdown
+        end_year = int(self._meta_param.get('end_year', 2025))
+        payload = WaitingPayload(
+            task_id=task_id,
+            reason='init_started',
+            end_year=end_year,
+            current_year=0
+        )
+        waiting_msg = WaitingMessage(
+            message_type='waiting',
+            publisher=self.__class__.__name__,
+            payload=payload
+        )
+        MESSAGE_BUS.publish(message=waiting_msg)
+        logger.info(f"已发布 waiting 事件: task_id={task_id}, reason=init_started")
+
+    def start_handler(self, message: Message):
+        """收到 start 后启动节点监控器。"""
+        logger.info("收到 start 消息，启动节点监控器")
+        self.start_monitor()
+
+    def clearport_handler(self, message: Message):
+        """清空端口池：监听到 clearport 后调用 clear_ports。"""
+        logger.info("收到 clearport 消息，执行清空端口池")
+        ok = self.clear_ports()
+        logger.info(f"clear_ports 结果: {ok}")
+
+    def shutdown_handler(self, message: Message):
+        """收到 shutdown 后停止节点监控器与等待线程。"""
+        logger.info("收到 shutdown 消息，停止节点监控器")
+        self.stop_monitor(timeout=10.0)
 
     def _subscribe(self):
         """订阅消息处理器"""
+        MESSAGE_BUS.subscribe('init', self.init_handler, 'NodeManager')
+        MESSAGE_BUS.subscribe('start', self.start_handler, 'NodeManager')
         MESSAGE_BUS.subscribe('waiting', self.waiting_handler, 'NodeManager')
+        MESSAGE_BUS.subscribe('clearport', self.clearport_handler, 'NodeManager')
+        MESSAGE_BUS.subscribe('shutdown', self.shutdown_handler, 'NodeManager')
 
-        
-    
+NODE_MANAGER = NodeManager()

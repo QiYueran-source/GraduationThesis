@@ -48,6 +48,12 @@ class ShutdownPayload(TypedDict, total=False):
     graceful: bool              # True=优雅关闭, False=强制关闭
     timeout: int                # 关闭超时时间(秒)
 
+
+class ClearPortPayload(TypedDict):
+    """清空端口池 payload，无额外字段"""
+    pass
+
+
 # =============================================================================
 # 完整的消息类型定义
 # =============================================================================
@@ -88,6 +94,13 @@ class ShutdownMessage(TypedDict):
     publisher: str
     payload: ShutdownPayload
 
+
+class ClearPortMessage(TypedDict):
+    message_type: Literal['clearport']
+    publisher: str
+    payload: ClearPortPayload
+
+
 # =============================================================================
 # 联合类型 - 所有消息类型
 # =============================================================================
@@ -99,7 +112,8 @@ Message = Union[
     TrainDataUpdatedMessage,
     StartMessage,
     WaitingMessage,
-    ShutdownMessage
+    ShutdownMessage,
+    ClearPortMessage
 ]
 
 MessageType = Literal[
@@ -111,5 +125,6 @@ MessageType = Literal[
     'start',
     'waiting',
     'shutdown',
+    'clearport',
     'all'
 ]
