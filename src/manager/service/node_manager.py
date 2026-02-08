@@ -714,39 +714,23 @@ class NodeManager:
     def init_handler(self, message: Message):
         """处理 init：发布 start，等待 30s 后获取可用端口、生成 meta 并启动所有节点。"""
         logger.info("收到 init 消息：发布 start，30s 后启动节点")
-
-        # 预先写入node_num 
-        node_info_key = REDIS_PREFIX_MANAGER.build_node_info_key()
-        port_range = self._node_config.get('web',{}).get('port_range', [8191, 8220])
-        port_num = port_range[1] - port_range[0] + 1
-        self._redis_client.hset(
-            node_info_key,
-            {
-                'node_num': port_num
-            }
-        )
-        logger.debug(f"预先写入node_num: {port_num}")
-        
-        # 发布 start（DataRedundancyMonitor 等据此启动）
+        # 1. 发布 start（DataRedundancyMonitor 等据此启动）
         start_msg = StartMessage(
             message_type='start',
             publisher=self.__class__.__name__,
             payload=StartMessagePayload()
         )
         MESSAGE_BUS.publish(message=start_msg)
-        
-        # 等待 30s
+        # 2. 等待 30s
         time.sleep(30)
-        
-        # 从 Redis 获取 task_id
+        # 3. 从 Redis 获取 task_id
         task_id_key = REDIS_PREFIX_MANAGER.build_task_id_key()
         task_id_raw = self._redis_client.get(task_id_key)
         if task_id_raw is None:
             logger.error("Redis 中无 task_id，跳过启动节点")
             return
         task_id = task_id_raw.decode('utf-8') if isinstance(task_id_raw, bytes) else str(task_id_raw)
-        
-        # 获取可用端口并启动节点
+        # 4. 获取可用端口并启动节点
         available = self.get_all_available_port()
         num = len(available)
         if num == 0:
@@ -755,22 +739,6 @@ class NodeManager:
         meta_list = self.generate_node_meta(num=num, task_id=task_id)
         ok, fail = self.start_nodes(meta_list)
         logger.info(f"init_handler 完成：已启动节点 成功={ok}, 失败={fail}")
-
-        # 发布 waiting，由本模块 waiting_handler 启动等待线程，等所有节点结束后发 shutdown
-        end_year = int(self._meta_param.get('end_year', 2025))
-        payload = WaitingPayload(
-            task_id=task_id,
-            reason='init_started',
-            end_year=end_year,
-            current_year=0
-        )
-        waiting_msg = WaitingMessage(
-            message_type='waiting',
-            publisher=self.__class__.__name__,
-            payload=payload
-        )
-        MESSAGE_BUS.publish(message=waiting_msg)
-        logger.info(f"已发布 waiting 事件: task_id={task_id}, reason=init_started")
 
     def start_handler(self, message: Message):
         """收到 start 后启动节点监控器。"""
