@@ -482,13 +482,36 @@ class NodeManager:
         logger.info(f"节点停止完成: 成功 {ok}, 失败 {fail}, 共 {len(running_ports)} 个节点")
         return ok, fail
 
+    def stop_all_nodes(self, wait_after_seconds: float = 2.0) -> Tuple[int, int]:
+        """停止当前任务的所有节点（从 Redis 读取 task_id），停止后等待并再检查一次。
+        
+        Args:
+            wait_after_seconds: 发送停止后等待秒数，再检查是否仍有节点在跑。
+        
+        Returns:
+            Tuple[int, int]: (成功数, 失败数)，与 stop_nodes_by_task_id 一致。
+        """
+        task_id_key = REDIS_PREFIX_MANAGER.build_task_id_key()
+        raw = self._redis_client.get(task_id_key)
+        current_task_id = (raw.decode('utf-8') if isinstance(raw, bytes) else raw) if raw else None
+        if not current_task_id:
+            logger.info("无当前 task_id，跳过停止节点")
+            return 0, 0
+        ok, fail = self.stop_nodes_by_task_id(current_task_id)
+        if ok + fail > 0 and wait_after_seconds > 0:
+            time.sleep(wait_after_seconds)
+            still_running = self.get_all_running_task_port(current_task_id)
+            if still_running:
+                logger.warning(f"shutdown 后仍有节点未停止 task_id={current_task_id}, 端口: {still_running}")
+        return ok, fail
+
     # =========================== 节点监控线程 =================================
     def _monitor_loop(self):
         """
         节点监控循环
-        - 每 interval 秒查询所有节点状态
-        - 统计每个 task_id 的节点数量和详细信息
-        - 保存到 Redis (gt:system:node_info)
+        - 每 interval 秒查询所有节点状态，仅统计当前 task_id（Redis 中的 task_id）的节点
+        - 保存到 Redis (gt:system:node_info)：node_num、last_update、nodes_record（三字段，无冗余）
+        - 若无当前 task_id 或无在跑节点，则 node_num=0，nodes_record=[]，保留字段结构
         """
         monitor_config = self._node_config.get('monitor', {})
         interval = float(monitor_config.get('interval', 120))
@@ -497,56 +520,44 @@ class NodeManager:
         
         while self.monitor_started:
             try:
+                # 当前 task_id 来自 Redis
+                task_id_key = REDIS_PREFIX_MANAGER.build_task_id_key()
+                raw = self._redis_client.get(task_id_key)
+                current_task_id = (raw.decode('utf-8') if isinstance(raw, bytes) else raw) if raw else None
+                if not current_task_id:
+                    current_task_id = ""
+                
                 # 获取所有节点状态
                 all_status = self.get_all_status()
                 
-                # 按 task_id 分组统计
-                task_nodes: Dict[str, List[Dict[str, Any]]] = {}
-                total_running = 0
-                
+                # 仅统计当前 task_id 的节点
+                current_nodes: List[Dict[str, Any]] = []
                 for port, status in all_status.items():
-                    if status.get('running') == 1:
-                        total_running += 1
-                        task_id = status.get('task_id')
-                        if task_id:
-                            if task_id not in task_nodes:
-                                task_nodes[task_id] = []
-                            # 保存节点详细信息
-                            node_info = {
-                                'port': port,
-                                'node_id': status.get('node_id'),
-                                'pid': status.get('pid'),
-                                'current_year_month': status.get('current_year_month'),
-                            }
-                            task_nodes[task_id].append(node_info)
+                    if status.get('running') != 1:
+                        continue
+                    if current_task_id and status.get('task_id') != current_task_id:
+                        continue
+                    current_nodes.append({
+                        'port': port,
+                        'node_id': status.get('node_id'),
+                        'pid': status.get('pid'),
+                        'current_year_month': status.get('current_year_month'),
+                    })
                 
-                # 保存到 Redis
+                node_num = len(current_nodes)
+                
+                # 三字段：node_num、last_update、nodes_record
                 node_info_key = REDIS_PREFIX_MANAGER.build_node_info_key()
-                
-                # 构建要保存的数据
                 node_info_data = {
-                    'node_num': str(total_running),
+                    'node_num': str(node_num),
                     'last_update': str(int(time.time())),
+                    'nodes_record': json.dumps(current_nodes, ensure_ascii=False),
                 }
-                
-                # 为每个 task_id 保存节点信息（JSON 格式）
-                for task_id, nodes in task_nodes.items():
-                    node_info_data[f'task_{task_id}_count'] = str(len(nodes))
-                    node_info_data[f'task_{task_id}_nodes'] = json.dumps(nodes, ensure_ascii=False)
-                
-                # 使用 hset 批量设置（如果支持）或逐个设置
-                if node_info_data:
-                    self._redis_client.hset(node_info_key, mapping=node_info_data)
-                    logger.info(
-                        f"节点监控更新: 总运行节点数={total_running}, "
-                        f"task_id数量={len(task_nodes)}, "
-                        f"task_ids={list(task_nodes.keys())}"
-                    )
-                else:
-                    # 如果没有运行节点，只更新 node_num 为 0
-                    self._redis_client.hset(node_info_key, 'node_num', '0')
-                    self._redis_client.hset(node_info_key, 'last_update', str(int(time.time())))
-                    logger.info("节点监控更新: 无运行节点")
+                self._redis_client.hset(node_info_key, mapping=node_info_data)
+                logger.info(
+                    f"节点监控更新: 当前 task_id={current_task_id or '(无)'}, "
+                    f"运行节点数={node_num}"
+                )
                 
             except Exception as e:
                 logger.error(f"节点监控循环异常: {e}", exc_info=True)
@@ -715,26 +726,50 @@ class NodeManager:
         logger.info(f'等待线程已启动，等待 task_id={task_id} 的所有节点完成')
 
     # ============================ init / start 消息handler ============================
+    def _init_node_info_with_port_count(self) -> None:
+        """在启动冗余监控前，将 node_info 的 node_num 初始化为配置的暴露端口数量，避免过期监控误删数据。"""
+        web = self._node_config.get('web', {})
+        pr = web.get('port_range', [8191, 8220])
+        start_port = int(pr[0])
+        end_port = int(pr[1])
+        port_count = end_port - start_port + 1
+        node_info_key = REDIS_PREFIX_MANAGER.build_node_info_key()
+        node_info_data = {
+            'node_num': str(port_count),
+            'last_update': str(int(time.time())),
+            'nodes_record': '[]',
+        }
+        self._redis_client.hset(node_info_key, mapping=node_info_data)
+        logger.info(f"已初始化 node_info: node_num={port_count}（暴露端口数 {start_port}～{end_port}）")
+
     def init_handler(self, message: Message):
         """处理 init：发布 start，等待 30s 后获取可用端口、生成 meta 并启动所有节点。"""
         logger.info("收到 init 消息：发布 start，30s 后启动节点")
-        # 1. 发布 start（DataRedundancyMonitor 等据此启动）
+        
+        # 先初始化 node_info（node_num=暴露端口数），再发 start，避免冗余/过期监控误删数据
+        self._init_node_info_with_port_count()
+        
+        # 发布 start（DataRedundancyMonitor 等据此启动）
         start_msg = StartMessage(
             message_type='start',
             publisher=self.__class__.__name__,
             payload=StartMessagePayload()
         )
         MESSAGE_BUS.publish(message=start_msg)
-        # 2. 等待 30s
+        
+        # 等待 30s
         time.sleep(30)
-        # 3. 从 Redis 获取 task_id
+        logger.debug("等待 30s , 确保数据完成加载")
+        
+        # 从 Redis 获取 task_id
         task_id_key = REDIS_PREFIX_MANAGER.build_task_id_key()
         task_id_raw = self._redis_client.get(task_id_key)
         if task_id_raw is None:
             logger.error("Redis 中无 task_id，跳过启动节点")
             return
         task_id = task_id_raw.decode('utf-8') if isinstance(task_id_raw, bytes) else str(task_id_raw)
-        # 4. 获取可用端口并启动节点
+        
+        # 获取可用端口并启动节点
         available = self.get_all_available_port()
         num = len(available)
         if num == 0:
@@ -756,8 +791,9 @@ class NodeManager:
         logger.info(f"clear_ports 结果: {ok}")
 
     def shutdown_handler(self, message: Message):
-        """收到 shutdown 后停止节点监控器与等待线程。"""
-        logger.info("收到 shutdown 消息，停止节点监控器")
+        """收到 shutdown 后先停止当前任务的所有节点，再停止节点监控器与等待线程。"""
+        logger.info("收到 shutdown 消息，停止当前任务节点并停止节点监控器")
+        self.stop_all_nodes(wait_after_seconds=2.0)
         self.stop_monitor(timeout=10.0)
 
     def _subscribe(self):
