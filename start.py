@@ -23,7 +23,6 @@ from src.manager.service.message import (
     InitMessage, InitMessagePayload,
     ShutdownPayload, ShutdownMessage,
     ClearPortPayload, ClearPortMessage,
-    WaitingPayload, WaitingMessage,
 )
 from src.utils.set import start_protect, stop_protect
 from src.manager.service import (
@@ -143,22 +142,19 @@ if __name__ == "__main__":
         logger.info("===========启动程序===========")
         main()
     except KeyboardInterrupt:
-        logger.info("收到中断信号")
-        client = REDIS_CONNECTOR.get_client()
-        raw = client.get(REDIS_PREFIX_MANAGER.build_task_id_key())
-        task_id = raw.decode('utf-8') if isinstance(raw, bytes) else (raw or '')
-        if task_id is not None and task_id:
-            MESSAGE_BUS.publish(
-                message = WaitingMessage(
-                    message_type='waiting',
-                    publisher='main_thread',
-                    payload=WaitingPayload(
-                        task_id=task_id, 
-                        reason='keyboard_interrupt'
-                    )
-                )
+        logger.info("收到中断信号，发布 shutdown，停止节点并退出")
+        MESSAGE_BUS.publish(
+            message=ShutdownMessage(
+                message_type='shutdown',
+                publisher='main_thread',
+                payload=ShutdownPayload(
+                    reason='keyboard_interrupt',
+                    graceful=True,
+                    timeout=300,
+                ),
             )
-        SHUTDOWN_RECEIVED.wait(timeout = 300)
+        )
+        SHUTDOWN_RECEIVED.wait(timeout=60)
         logger.info("===========收到中断信号===========")
         exit_code = 0
     except Exception as e:

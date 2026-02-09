@@ -159,19 +159,18 @@ class DataRedundancyMonitor:
         - 检测当前的年份  
         - 如果 已有年份<=min，则加载 max-已有年份 的数据进入（发布加载事件）  
         - 年份前进 max-已有年份  
-        - 如果年份>=最大年份，则发布 waiting 事件并启动等待线程
+        - 如果年份>=最大年份，则退出监控循环（等待由任务启动时统一发 waiting）
         - 发布加载事件后，设置等待=True,直到监听到更新成功事件后，才继续监控
         """
         count = 0 # 记录监控次数  
         end_year = self._meta_param.get('end_year', 2025)
 
         while self.started:
-            # 检查是否到达 end_year
+            # 检查是否到达 end_year（仅退出循环，不再发布 waiting，由任务启动时统一发 waiting）
             with self._lock:
                 if self.now_year >= end_year:
-                    logger.info(f'到达结束年份 end_year={end_year}, now_year={self.now_year}，发布 waiting 事件')
-                    self._publish_waiting()
-                    break  # 退出监控循环
+                    logger.info(f'到达结束年份 end_year={end_year}, now_year={self.now_year}，退出监控循环')
+                    break
 
             loaded_year_count = self._count_slice_year()
 
@@ -191,10 +190,9 @@ class DataRedundancyMonitor:
             self.req_count+=1 # req计数器+1
             year_list = [self.now_year + i for i in range(1, load_years+1) if self.now_year + i <= end_year]
             
-            # 如果 year_list 为空且 now_year >= end_year，触发 waiting
+            # 如果 year_list 为空且 now_year >= end_year，退出监控循环
             if not year_list and self.now_year >= end_year:
-                logger.info(f'year_list 为空且 now_year={self.now_year} >= end_year={end_year}，发布 waiting 事件')
-                self._publish_waiting()
+                logger.info(f'year_list 为空且 now_year={self.now_year} >= end_year={end_year}，退出监控循环')
                 break
             
             payload = LoadRequestPayload(

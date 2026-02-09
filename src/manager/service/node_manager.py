@@ -642,7 +642,7 @@ class NodeManager:
             task_id: 任务ID
         """
         check_interval = 30  # 检查间隔（秒）
-        max_wait_time = 7200  # 最大等待时间（2小时）
+        max_wait_time = 24 * 3600  # 最大等待时间（24小时，任务启动时挂上的等待）
         start_wait_time = time.time()
         
         logger.info(f'开始等待 task_id={task_id} 的所有节点完成')
@@ -778,6 +778,19 @@ class NodeManager:
         meta_list = self.generate_node_meta(num=num, task_id=task_id)
         ok, fail = self.start_nodes(meta_list)
         logger.info(f"init_handler 完成：已启动节点 成功={ok}, 失败={fail}")
+        # 节点已启动后发布 waiting，启动等待线程（等所有节点完成后发 shutdown），超时 24h
+        wait_payload = WaitingPayload(
+            task_id=task_id,
+            reason='task_started',
+            end_year=0,
+            current_year=0,
+        )
+        MESSAGE_BUS.publish(message=WaitingMessage(
+            message_type='waiting',
+            publisher=self.__class__.__name__,
+            payload=wait_payload,
+        ))
+        logger.info(f"已发布 waiting 消息，task_id={task_id}，等待节点完成后将发布 shutdown")
 
     def start_handler(self, message: Message):
         """收到 start 后启动节点监控器。"""
