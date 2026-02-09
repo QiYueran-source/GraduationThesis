@@ -216,7 +216,7 @@ class ConnectionMonitor:
         log_interval = self._config.get('metrics_logging_interval', 600)
 
         # 日志记录循环
-        while True:
+        while self._logging: # 日志记录循环
             try:
                 self._log_current_metrics()
                 time.sleep(log_interval)

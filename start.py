@@ -172,5 +172,5 @@ if __name__ == "__main__":
         MESSAGE_BUS.stop()
         _delete_gt_keys(REDIS_CONNECTOR.get_client(), REDIS_PREFIX_MANAGER)
         print("等待所有工作停止")
-        time.sleep(30) # 等待所有工作停止
+        time.sleep(5) # 等待所有工作停止
         sys.exit(exit_code)
