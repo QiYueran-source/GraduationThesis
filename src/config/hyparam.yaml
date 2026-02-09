@@ -11,25 +11,25 @@ meta_seed: 42
 # 节点 meta：由主机提供
 # 【顶层 = 固定】
 meta:
-  start_year: 1997
+  start_year: 2010
   end_year: 2024
   earliest_year_month: [1997, 1]
-  n: 5
-  max_portfolios_num: 252
+  n: 1
+  max_portfolios_num: 1
   env_config:
     sample_and_shuffle_seed: 42 # 证券采样和洗牌的种子，保证所有的节点都使用相同的证券采样和洗牌
-    rl_end_year: 2015   # 强化学习结束年份，月份默认 12
-    save_every_n_steps: 252     # 每 252 步保存一次模型
+    rl_end_year: 2020   # 强化学习结束年份，月份默认 12
+    save_every_n_steps: 20     # 每 252 步保存一次模型
   performance_config:
-    risk_free_rate: 0.015
+    risk_free_rate: 0.00
     rolling_window: 24
     std_window: 24
 
   # 【train_config = 随机】下面为 range/选项，由 node_manager 随机采样
   train_config:
-    seed_range: [1, 1000]
-    m_range: [1, 12]
-    mask_len_range: [44, 88]
+    seed_range: [1, 1000] # [1, 1000]
+    m_range: [12, 12] # [1, 12]
+    mask_len_range: [88, 88] # [44, 88]
     model_config:
       cate_type: [0]
       dropout_range: [0.00, 0.25]
@@ -40,7 +40,10 @@ meta:
       clip_grad_norm_range: [0.5, 1.0]
       weight_decay_range: [0, 0.01]
     reward_config:
-      # reward_weights: rtr / vol / sharpe / max_drawdown 随机生成且和为 1
+      rtr_range: [0.1, 0.9]        # rtr 权重范围
+      vol_range: [0.1, 0.9]        # vol 权重范围
+      sharpe_range: [0.1, 0.9]     # sharpe 权重范围
+      max_drawdown_range: [0.1, 0.9]  # max_drawdown 权重范围
 
 # redis 数据冗余配置
 redis_redundancy:

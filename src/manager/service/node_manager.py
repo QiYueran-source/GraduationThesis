@@ -301,8 +301,23 @@ class NodeManager:
         else:
             out['reinforcement_config'] = {'cate': 0, 'opt': {'lr': 1e-4}}
 
+        # 从配置文件读取reward_config范围设置
+        rw_cfg = tc.get('reward_config') or {}
         keys = ['rtr', 'vol', 'sharpe', 'max_drawdown']
-        raw = [rng.uniform(0.01, 1.0) for _ in keys]
+
+        # 为每个权重从配置中读取范围，如果没有配置则使用默认值
+        raw = []
+        for key in keys:
+            range_key = f'{key}_range'
+            range_val = rw_cfg.get(range_key)
+            if range_val and isinstance(range_val, (list, tuple)) and len(range_val) >= 2:
+                # 使用配置的范围
+                weight = rng.uniform(float(range_val[0]), float(range_val[1]))
+            else:
+                # 使用默认范围
+                weight = rng.uniform(0.01, 1.0)
+            raw.append(weight)
+
         total = sum(raw)
         out['reward_config'] = {'reward_weights': {k: v / total for k, v in zip(keys, raw)}}
         return out
