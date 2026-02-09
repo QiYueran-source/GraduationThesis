@@ -33,6 +33,7 @@ from src.manager.redis import REDIS_CONNECTOR, REDIS_PREFIX_MANAGER
 
 # 日志
 from src.utils.logger import get_module_logger
+from src.utils.thread import interruptible_sleep
 logger = get_module_logger(__name__,'[NodeManager]')
 
 class NodeManager:
@@ -550,9 +551,10 @@ class NodeManager:
             except Exception as e:
                 logger.error(f"节点监控循环异常: {e}", exc_info=True)
             
-            # 等待 interval 秒后继续下一次监控
+            # 等待 interval 秒后继续下一次监控（可中断，便于停止时快速退出）
             if self.monitor_started:
-                time.sleep(interval)
+                if not interruptible_sleep(interval, lambda: self.monitor_started, check_interval=1.0):
+                    break
 
     def start_monitor(self):
         """启动节点监控器"""
@@ -653,12 +655,14 @@ class NodeManager:
                 else:
                     logger.info(f'仍有 {len(running_ports)} 个节点在运行 task_id={task_id}，端口: {running_ports}')
                 
-                # 等待一段时间后继续检查
-                time.sleep(check_interval)
+                # 等待一段时间后继续检查（可中断）
+                if not interruptible_sleep(check_interval, lambda: self.waiting_for_nodes, check_interval=1.0):
+                    break
                 
             except Exception as e:
                 logger.error(f'等待循环异常: {e}', exc_info=True)
-                time.sleep(check_interval)
+                if not interruptible_sleep(check_interval, lambda: self.waiting_for_nodes, check_interval=1.0):
+                    break
         
         logger.info(f'等待线程结束，task_id={task_id}')
 

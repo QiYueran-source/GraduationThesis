@@ -18,6 +18,7 @@ from src.manager.redis.exception import (
     RedisException,
     RedisConfigurationException
 )
+from src.utils.thread import interruptible_sleep
 
 @dataclass
 class ConnectionMetrics:
@@ -113,19 +114,22 @@ class ConnectionMonitor:
                     
                     # 如果连续失败太多，增加检查间隔
                     if consecutive_failures >= max_consecutive_failures:
-                        time.sleep(interval * 2)  # 增加检查间隔
+                        if not interruptible_sleep(interval * 2, lambda: self._monitoring, check_interval=1.0):
+                            break
                         continue
                 
-                # 正常检查间隔
-                time.sleep(interval)
+                # 正常检查间隔（可中断，便于停止时快速退出）
+                if not interruptible_sleep(interval, lambda: self._monitoring, check_interval=1.0):
+                    break
                 
             except Exception as e:
                 # 监控过程本身的异常
                 consecutive_failures += 1
                 logger.error(f"监控循环异常: {e}")
                 
-                # 防止监控异常导致CPU占用过高
-                time.sleep(min(interval, 5))
+                # 防止监控异常导致CPU占用过高（可中断）
+                if not interruptible_sleep(min(interval, 5), lambda: self._monitoring, check_interval=1.0):
+                    break
 
     def _start_monitor_thread(self):
         """启动监控线程"""
@@ -215,14 +219,16 @@ class ConnectionMonitor:
         # 获取配置
         log_interval = self._config.get('metrics_logging_interval', 600)
 
-        # 日志记录循环
-        while self._logging: # 日志记录循环
+        # 日志记录循环（使用可中断等待，便于停止时快速退出）
+        while self._logging:
             try:
                 self._log_current_metrics()
-                time.sleep(log_interval)
+                if not interruptible_sleep(log_interval, lambda: self._logging, check_interval=1.0):
+                    break
             except Exception as e:
                 logger.error(f"Metrics日志记录异常: {e}")
-                time.sleep(10)  # 出错后等待10秒再试
+                if not interruptible_sleep(10, lambda: self._logging, check_interval=1.0):
+                    break
     
     def _log_current_metrics(self):
         """记录当前metrics到日志"""

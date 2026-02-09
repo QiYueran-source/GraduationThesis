@@ -28,7 +28,8 @@ from src.utils.logger import get_module_logger
 logger = get_module_logger(__name__,'[DataMonitor]')
 
 # 异常 
-from src.manager.service.exception import * 
+from src.manager.service.exception import *
+from src.utils.thread import interruptible_sleep 
 
 # 数据冗余监控器 
 class DataRedundancyMonitor:
@@ -174,10 +175,15 @@ class DataRedundancyMonitor:
 
             loaded_year_count = self._count_slice_year()
 
-            # 如果数据充足，则静默等待（仅缺失数据时记录日志）
+            # 如果数据充足，则静默等待（仅缺失数据时记录日志）；可中断便于停止时快速退出
             if loaded_year_count > self._redundancy_param.get('min_periods_year',1):
                 count += 1
-                time.sleep(self._redundancy_param.get('interval', 120))
+                if not interruptible_sleep(
+                    self._redundancy_param.get('interval', 120),
+                    lambda: self.started,
+                    check_interval=1.0,
+                ):
+                    break
                 continue
 
             # 如果不足，发布加载事件(次数为)
@@ -216,10 +222,10 @@ class DataRedundancyMonitor:
                 if time.time() - start_wait_time > timeout:
                     logger.error(f"等待数据更新超时（{timeout}秒），req_id: {self.req_count}")
                     self.waiting_for_update = False
-                    break 
-                
-                # 等待  
-                time.sleep(wait_interval)
+                    break
+                # 等待（可中断，便于停止时快速退出）
+                if not interruptible_sleep(wait_interval, lambda: self.started, check_interval=1.0):
+                    break
 
     def _publish_waiting(self):
         """发布 waiting 事件（由 NodeManager 处理等待逻辑）"""
@@ -431,7 +437,12 @@ class DataExpirationMonitor:
             counter_df = self._get_all_counter()  # 获取所有数据计数器
 
             if counter_df.is_empty():
-                time.sleep(self._expiration_param.get('interval',30))
+                if not interruptible_sleep(
+                    self._expiration_param.get('interval', 30),
+                    lambda: self.started,
+                    check_interval=1.0,
+                ):
+                    break
                 continue  
 
             # 1.判断哪些已经被全部访问 
@@ -472,8 +483,13 @@ class DataExpirationMonitor:
                 # 一次性执行所有 set 命令
                 set_pipeline.execute()
 
-            # （添加循环休眠，避免空转占用CPU
-            time.sleep(self._expiration_param.get('interval',30))  
+            # 循环休眠，避免空转占用CPU（可中断，便于停止时快速退出）
+            if not interruptible_sleep(
+                self._expiration_param.get('interval', 30),
+                lambda: self.started,
+                check_interval=1.0,
+            ):
+                break  
 
     def start(self):
         with self._lock:

@@ -16,6 +16,7 @@ from src.manager.service.message import Message, MessageType
 
 # 日志
 from src.utils.logger import get_module_logger
+from src.utils.thread import interruptible_sleep
 logger = get_module_logger(__name__, prefix='[MessageBus]')
 
 # 异常
@@ -121,7 +122,8 @@ class MessageBus:
                             
                 except Exception as e:
                     logger.error(f"订阅者循环异常: {e}")
-                    time.sleep(1)  # 避免频繁重试
+                    if not interruptible_sleep(1, lambda: self._running, check_interval=0.5):
+                        break
         
         # 创建并启动线程
         self._subscriber_thread = threading.Thread(
