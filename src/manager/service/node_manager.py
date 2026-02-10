@@ -322,42 +322,62 @@ class NodeManager:
         out['reward_config'] = {'reward_weights': {k: v / total for k, v in zip(keys, raw)}}
         return out
 
-    def generate_node_meta(self, num: int, task_id: str) -> List[Dict[str, Any]]:
-        """随机化生成节点 meta，所有 meta 共享同一 task_id。约定：顶层 = 固定，train_config = 随机。"""
-        if num <= 0:
-            return []
-
+    def generate_shared_meta(self, task_id: str) -> Dict[str, Any]:
+        """生成所有节点共享的meta配置（不含train_config）"""
         meta = self._meta_param or {}
         pool_type = self._stock_pool_param.get('pool_type', 'test')
         stock_list = get_code_list(code_type=pool_type)
-        N = len(stock_list)
-        start_year = int(meta.get('start_year', 1997))
-        end_year = int(meta.get('end_year', 2025))
-        earliest_year_month = self._parse_earliest_year_month(meta.get('earliest_year_month', (1997, 1)))
-        n = int(meta.get('n', 10))
-        max_portfolios_num = int(meta.get('max_portfolios_num', 500))
-        env_config = dict(copy.deepcopy(meta.get('env_config') or {}))
-        performance_config = dict(copy.deepcopy(meta.get('performance_config') or {}))
+
+        return {
+            'task_id': task_id,
+            'start_year': int(meta.get('start_year', 1997)),
+            'end_year': int(meta.get('end_year', 2025)),
+            'N': len(stock_list),
+            'stock_list': list(stock_list),
+            'earliest_year_month': list(self._parse_earliest_year_month(
+                meta.get('earliest_year_month', (1997, 1)))),
+            'n': int(meta.get('n', 10)),
+            'max_portfolios_num': int(meta.get('max_portfolios_num', 500)),
+            'env_config': dict(copy.deepcopy(meta.get('env_config') or {})),
+            'performance_config': dict(copy.deepcopy(meta.get('performance_config') or {})),
+            'factors_list': [],  # 由节点本地提供
+        }
+
+    def generate_train_configs(self, num: int) -> List[Dict[str, Any]]:
+        """为指定数量的节点生成不同的train_config"""
+        meta = self._meta_param or {}
         tc_template = meta.get('train_config') or {}
 
         rng = random.Random(self._meta_seed)
-        meta_list: List[Dict[str, Any]] = []
+        train_configs = []
+
         for i in range(num):
             train_config = self._sample_train_config(tc_template, rng)
-            meta_list.append({
-                'task_id': task_id,
-                'start_year': start_year,
-                'end_year': end_year,
-                'N': N,
-                'stock_list': list(stock_list),
-                'earliest_year_month': list(earliest_year_month),
-                'n': n,
-                'max_portfolios_num': max_portfolios_num,
-                'env_config': env_config,
-                'performance_config': performance_config,
-                'factors_list': [],  # 不读取，由节点本地提供
-                'train_config': train_config,
-            })
+            train_configs.append(train_config)
+
+        logger.info(f"生成 {num} 个节点的 train_config")
+        return train_configs
+
+    def generate_node_meta(self, num: int, task_id: str) -> List[Dict[str, Any]]:
+        """随机化生成节点 meta，所有 meta 共享同一 task_id。约定：顶层 = 固定，train_config = 随机。
+
+        兼容性函数：使用新的generate_shared_meta和generate_train_configs方法组合完整meta。
+        """
+        if num <= 0:
+            return []
+
+        # 获取共享配置
+        shared_meta = self.generate_shared_meta(task_id)
+
+        # 获取个性化配置
+        train_configs = self.generate_train_configs(num)
+
+        # 组合完整meta
+        meta_list = []
+        for train_config in train_configs:
+            full_meta = {**shared_meta, 'train_config': train_config}
+            meta_list.append(full_meta)
+
         logger.info(f"生成 {num} 条节点 meta，task_id: {task_id}")
         return meta_list
 
