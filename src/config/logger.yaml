@@ -1,9 +1,9 @@
 logger:
-  level: 'DEBUG'
+  level: 'INFO'
   default_prefix: '[Logger]'
 handlers:
   file_names: 'logs/app'
-  level: 'DEBUG'
+  level: 'INFO'
   when: 'midnight'
   interval: 1
   backup_count: 5
