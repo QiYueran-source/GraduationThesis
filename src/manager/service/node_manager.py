@@ -384,11 +384,11 @@ class NodeManager:
         return meta_list
 
     # ============================ 启动节点 ============================
-    def _send_task_to_node(self, host: str, port: int, train_config: Dict[str, Any]) -> Dict[str, Any]:
-        """向单个节点发送 req=1 启动任务，TCP 发送 {"req": 1, "train_config": train_config}，返回节点 JSON 响应。"""
+    def _send_task_to_node(self, host: str, port: int, task_id: str, train_config: Dict[str, Any]) -> Dict[str, Any]:
+        """向单个节点发送 req=1 启动任务，TCP 发送 {"req": 1, "task_id": task_id, "train_config": train_config}，返回节点 JSON 响应。"""
         web = self._node_config.get('web', {})
         connect_timeout = float(web.get('timeout', 10))
-        payload = json.dumps({"req": 1, "train_config": train_config}).encode('utf-8')
+        payload = json.dumps({"req": 1, "task_id": task_id, "train_config": train_config}).encode('utf-8')
         sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -412,7 +412,7 @@ class NodeManager:
 
     def _start_single_node(self, host: str, port: int, train_config: Dict[str, Any], task_id: str) -> bool:
         """启动单个节点：发送 req=1 和 train_config，成功则返回 True（响应含 success），否则 False。"""
-        resp = self._send_task_to_node(host, port, train_config)
+        resp = self._send_task_to_node(host, port, task_id, train_config)
         if isinstance(resp, dict) and resp.get("success") == "start success":
             logger.info(f"节点 {host}:{port} 启动成功, task_id: {task_id}")
             return True
@@ -796,10 +796,11 @@ class NodeManager:
         self._init_node_info_with_port_count()
 
         # 初始化元数据
-        meta_key = REDIS_PREFIX_MANAGER.build_meta_key()
+        meta_key = f"gt:data:meta:{task_id}"
         meta = self.generate_shared_meta(task_id)
-        self._redis_client.hset(meta_key, mapping=meta)
-        logger.info(f"已初始化 meta: {meta}")
+        meta_json = json.dumps(meta, ensure_ascii=False)
+        self._redis_client.set(meta_key, meta_json)
+        logger.info(f"已初始化 meta: task_id={task_id}")
 
         # 发布 start（DataRedundancyMonitor 等据此启动）
         start_msg = StartMessage(
