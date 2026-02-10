@@ -796,7 +796,7 @@ class NodeManager:
         self._init_node_info_with_port_count()
 
         # 初始化元数据
-        meta_key = f"gt:data:meta:{task_id}"
+        meta_key = REDIS_PREFIX_MANAGER.build_meta_key()
         meta = self.generate_shared_meta(task_id)
         meta_json = json.dumps(meta, ensure_ascii=False)
         self._redis_client.set(meta_key, meta_json)
