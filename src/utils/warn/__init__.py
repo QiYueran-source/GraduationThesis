@@ -1,0 +1,1 @@
+from src.utils.warn.deprecate import deprecated

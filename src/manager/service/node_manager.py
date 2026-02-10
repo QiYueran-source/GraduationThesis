@@ -30,6 +30,7 @@ from src.manager.service.message import (
 from src.manager.database import get_code_list
 from src.manager.service.bus import MESSAGE_BUS
 from src.manager.redis import REDIS_CONNECTOR, REDIS_PREFIX_MANAGER
+from src.utils.warn.deprecate import deprecated
 
 # 日志
 from src.utils.logger import get_module_logger
@@ -343,6 +344,7 @@ class NodeManager:
             'factors_list': [],  # 由节点本地提供
         }
 
+    @deprecated("use generate_train_configs instead")
     def generate_train_configs(self, num: int) -> List[Dict[str, Any]]:
         """为指定数量的节点生成不同的train_config"""
         meta = self._meta_param or {}
@@ -382,11 +384,11 @@ class NodeManager:
         return meta_list
 
     # ============================ 启动节点 ============================
-    def _send_task_to_node(self, host: str, port: int, meta: Dict[str, Any]) -> Dict[str, Any]:
-        """向单个节点发送 req=1 启动任务，TCP 发送 {"req": 1, "meta": meta}，返回节点 JSON 响应。"""
+    def _send_task_to_node(self, host: str, port: int, train_config: Dict[str, Any]) -> Dict[str, Any]:
+        """向单个节点发送 req=1 启动任务，TCP 发送 {"req": 1, "train_config": train_config}，返回节点 JSON 响应。"""
         web = self._node_config.get('web', {})
         connect_timeout = float(web.get('timeout', 10))
-        payload = json.dumps({"req": 1, "meta": meta}).encode('utf-8')
+        payload = json.dumps({"req": 1, "train_config": train_config}).encode('utf-8')
         sock = None
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -408,38 +410,39 @@ class NodeManager:
                 except OSError:
                     pass
 
-    def _start_single_node(self, host: str, port: int, meta: Dict[str, Any]) -> bool:
-        """启动单个节点：发送 req=1，成功则返回 True（响应含 success），否则 False。"""
-        resp = self._send_task_to_node(host, port, meta)
+    def _start_single_node(self, host: str, port: int, train_config: Dict[str, Any], task_id: str) -> bool:
+        """启动单个节点：发送 req=1 和 train_config，成功则返回 True（响应含 success），否则 False。"""
+        resp = self._send_task_to_node(host, port, train_config)
         if isinstance(resp, dict) and resp.get("success") == "start success":
-            logger.info(f"节点 {host}:{port} 启动成功, task_id: {meta.get('task_id', '')}")
+            logger.info(f"节点 {host}:{port} 启动成功, task_id: {task_id}")
             return True
         err = resp.get("error", resp) if isinstance(resp, dict) else resp
         logger.warning(f"节点 {host}:{port} 启动失败: {err}")
         return False
 
-    def start_nodes(self, meta_list: List[Dict[str, Any]]) -> Tuple[int, int]:
-        """按可用端口顺序向各节点下发 meta 启动任务。
-        - 先 get_all_available_port()，取前 len(meta_list) 个端口与 meta_list 一一对应下发。
+    def start_nodes(self, train_config_list: List[Dict[str, Any]], task_id: str) -> Tuple[int, int]:
+        """按可用端口顺序向各节点下发 train_config 启动任务。
+        - 先 get_all_available_port()，取前 len(train_config_list) 个端口与 train_config_list 一一对应下发。
         - 返回 (成功数, 失败数)。
         """
-        if not meta_list:
+        if not train_config_list:
             return 0, 0
         web = self._node_config.get('web', {})
         host = web.get('node_host', 'localhost')
         available_str = self.get_all_available_port()  # 返回字符串列表
+        
         # 转换为整数列表
         available = [int(port) for port in available_str]
-        if len(available) < len(meta_list):
-            logger.warning(f"可用端口数 {len(available)} 小于 meta 数 {len(meta_list)}，仅启动前 {len(available)} 个节点")
-        ports = available[: len(meta_list)]
+        if len(available) < len(train_config_list):
+            logger.warning(f"可用端口数 {len(available)} 小于 train_config 数 {len(train_config_list)}，仅启动前 {len(available)} 个节点")
+        ports = available[: len(train_config_list)]
         ok, fail = 0, 0
-        for port, meta in zip(ports, meta_list):
-            if self._start_single_node(host, port, meta):
+        for port, train_config in zip(ports, train_config_list):
+            if self._start_single_node(host, port, train_config, task_id):
                 ok += 1
             else:
                 fail += 1
-        logger.info(f"节点启动完成: 成功 {ok}, 失败 {fail}, 共 {len(meta_list)} 条 meta")
+        logger.info(f"节点启动完成: 成功 {ok}, 失败 {fail}, 共 {len(train_config_list)} 条 train_config")
         return ok, fail
 
     # ============================ 停止节点 ============================
@@ -780,10 +783,24 @@ class NodeManager:
     def init_handler(self, message: Message):
         """处理 init：发布 start，等待 30s 后获取可用端口、生成 meta 并启动所有节点。"""
         logger.info("收到 init 消息：发布 start，30s 后启动节点")
+
+        # 从 Redis 获取 task_id
+        task_id_key = REDIS_PREFIX_MANAGER.build_task_id_key()
+        task_id_raw = self._redis_client.get(task_id_key)
+        if task_id_raw is None:
+            logger.error("Redis 中无 task_id，跳过启动节点")
+            return
+        task_id = task_id_raw.decode('utf-8') if isinstance(task_id_raw, bytes) else str(task_id_raw)
         
         # 先初始化 node_info（node_num=暴露端口数），再发 start，避免冗余/过期监控误删数据
         self._init_node_info_with_port_count()
-        
+
+        # 初始化元数据
+        meta_key = REDIS_PREFIX_MANAGER.build_meta_key()
+        meta = self.generate_shared_meta(task_id)
+        self._redis_client.hset(meta_key, mapping=meta)
+        logger.info(f"已初始化 meta: {meta}")
+
         # 发布 start（DataRedundancyMonitor 等据此启动）
         start_msg = StartMessage(
             message_type='start',
@@ -796,23 +813,16 @@ class NodeManager:
         time.sleep(30)
         logger.debug("等待 30s , 确保数据完成加载")
         
-        # 从 Redis 获取 task_id
-        task_id_key = REDIS_PREFIX_MANAGER.build_task_id_key()
-        task_id_raw = self._redis_client.get(task_id_key)
-        if task_id_raw is None:
-            logger.error("Redis 中无 task_id，跳过启动节点")
-            return
-        task_id = task_id_raw.decode('utf-8') if isinstance(task_id_raw, bytes) else str(task_id_raw)
-        
         # 获取可用端口并启动节点
         available = self.get_all_available_port()
         num = len(available)
         if num == 0:
             logger.warning("无可用端口，跳过启动节点")
             return
-        meta_list = self.generate_node_meta(num=num, task_id=task_id)
-        ok, fail = self.start_nodes(meta_list)
+        train_config_list = self.generate_train_configs(num=num)
+        ok, fail = self.start_nodes(train_config_list, task_id)
         logger.info(f"init_handler 完成：已启动节点 成功={ok}, 失败={fail}")
+        
         # 节点已启动后发布 waiting，启动等待线程（等所有节点完成后发 shutdown），超时 24h
         wait_payload = WaitingPayload(
             task_id=task_id,
