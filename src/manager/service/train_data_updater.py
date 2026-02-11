@@ -35,7 +35,7 @@ class TrainDataUpdater:
         self.client = REDIS_CONNECTOR.get_client()
 
         # 内部变量
-        self.first = True  
+        self.first = True
         self.latest_df:pl.DataFrame = None # 最新的数据框，用于填充
         self.now_year:int = 0 # 当前年份
         self.factors = sorted([s.lower() for s in get_factors_info()['factor_name'].to_list()])
@@ -43,37 +43,66 @@ class TrainDataUpdater:
         # 线程锁，保证一次只处理一个年份的数据
         self.lock = Lock()
 
+        # 加载配置
+        self._load_config()
+
         # 注册处理器
         self._subscribe()
 
+    def _load_config(self):
+        """加载配置"""
+        try:
+            with open('src/config/hyparam.yaml', 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+                self._updater_retry_config = config.get('updater_retry', {})
+        except Exception as e:
+            logger.error(f"加载updater_retry配置失败: {e}")
+            # 默认配置
+            self._updater_retry_config = {'max_retries': 5, 'retry_delay': 1.0}
+
     # 数据片加载
     def _load_data_from_redis(self, year: int) -> tuple[pl.DataFrame, pl.DataFrame]:
-        """从Redis加载因子和收益率数据（单独抽离为函数，便于复用/测试）"""
+        """从Redis加载因子和收益率数据，支持重试机制解决时序竞争"""
+        # 获取重试配置
+        max_retries = self._updater_retry_config.get('max_retries', 5)
+        retry_delay = self._updater_retry_config.get('retry_delay', 1.0)
+
         # 1. 构建Redis键
         factors_key = REDIS_PREFIX_MANAGER.build_df_key(year, 'factors_df')
         return_key = REDIS_PREFIX_MANAGER.build_df_key(year, 'return_df')
-        
-        # 2. 读取并校验数据
-        factors_raw = self.client.get(factors_key)
-        return_raw = self.client.get(return_key)
-        if not factors_raw or not return_raw:
-            raise ValueError(f"年份{year}的因子/收益率数据在Redis中不存在")
-        
+
+        # 2. 重试机制：解决时序竞争问题
+        for attempt in range(max_retries):
+            # 读取并校验数据
+            factors_raw = self.client.get(factors_key)
+            return_raw = self.client.get(return_key)
+
+            if factors_raw and return_raw:
+                # 数据存在，继续正常处理
+                break
+
+            # 数据不存在，重试
+            if attempt < max_retries - 1:
+                logger.warning(f"年份{year}的因子/收益率数据暂不存在，重试 {attempt + 1}/{max_retries}，等待 {retry_delay}s")
+                time.sleep(retry_delay)
+            else:
+                raise ValueError(f"年份{year}的因子/收益率数据在重试{max_retries}次后仍不存在")
+
         # 3. 解析JSON并转为DataFrame（增加异常处理）
         try:
             factors_df_dicts = json.loads(factors_raw)
             return_df_dicts = json.loads(return_raw)
         except json.JSONDecodeError as e:
             raise Exception(f"年份{year}的JSON数据解析失败: {e}") from e
-        
+
         # 4. 转为Polars DF + 日期转换（容错+指定时区）
         date_parse_expr = pl.col('accper').str.strptime(
             pl.Date, format='%Y-%m-%d', strict=False  # strict=False跳过非法日期
         ).fill_null(pl.date(1900,1,1))  # 非法日期转为1900-01-01，后续过滤
-        
+
         factors_df = pl.DataFrame(factors_df_dicts).with_columns(date_parse_expr)
         return_df = pl.DataFrame(return_df_dicts).with_columns(date_parse_expr)
-        
+
         # 5. 数据类型校验（因子列转为数值型，避免字符串导致后续计算失败）
         factors_df = factors_df.with_columns(
             [pl.col(f).cast(pl.Float64, strict=False) for f in self.factors]
@@ -81,11 +110,11 @@ class TrainDataUpdater:
         return_df = return_df.with_columns(
             pl.col('monthly_return').cast(pl.Float64, strict=False)
         )
-        
+
         # 6. 过滤非法数据
         factors_df = factors_df.filter(pl.col('accper') != pl.date(1900,1,1))
         return_df = return_df.filter(pl.col('accper') != pl.date(1900,1,1))
-        
+
         return factors_df, return_df
 
     def _standardize_factors(self, factors_df: pl.DataFrame) -> pl.DataFrame:
