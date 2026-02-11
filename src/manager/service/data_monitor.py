@@ -340,7 +340,7 @@ DATA_REDUNDANCY_MONITOR = DataRedundancyMonitor()
 class DataExpirationMonitor:
     def __init__(self):
         """数据过期监控器
-        1.获取node_info中的node_num  
+        1.获取node_info中的node_num
         2.获取
         """
         # redis客户端
@@ -352,6 +352,9 @@ class DataExpirationMonitor:
         # 线程管理
         self.started = False # 启动标志
         self._lock = threading.Lock()
+
+        # 孤岛年份跟踪
+        self._marked_isolated_years = set()  # 已标记为孤岛的年份集合，避免重复设置TTL
 
         # 加载配置
         self._load_config()
@@ -464,13 +467,28 @@ class DataExpirationMonitor:
             counter_df = counter_df.join(all_visited_df, on=['year','month','code'], how='anti')
 
             # 2.检测和清理孤岛数据（不与当前加载年份连续的过期年份）
-            isolated_years = self._detect_isolated_years()
-            if isolated_years:
-                self._cleanup_isolated_years(isolated_years)
+            current_isolated_years = self._detect_isolated_years()
 
-            # 从df中移除孤岛年份的数据
-            if isolated_years and not counter_df.is_empty():
-                isolated_years_df = pl.DataFrame({'year': list(isolated_years)})
+            # 找出新增的孤岛年份（之前未标记的）
+            new_isolated_years = current_isolated_years - self._marked_isolated_years
+
+            if new_isolated_years:
+                self._cleanup_isolated_years(new_isolated_years)
+                # 将新增的孤岛年份加入已标记集合
+                self._marked_isolated_years.update(new_isolated_years)
+                logger.info(f"新增孤岛年份标记: {sorted(new_isolated_years)}，累计标记: {len(self._marked_isolated_years)} 个")
+
+            # 定期清理已不存在年份的标记（避免集合无限增长）
+            if len(self._marked_isolated_years) > 0:
+                existing_years = self._get_all_data_years()
+                removed_years = self._marked_isolated_years - existing_years
+                if removed_years:
+                    self._marked_isolated_years -= removed_years
+                    logger.debug(f"清理已过期孤岛年份标记: {sorted(removed_years)}")
+
+            # 从df中移除孤岛年份的数据（使用当前检测到的所有孤岛年份）
+            if current_isolated_years and not counter_df.is_empty():
+                isolated_years_df = pl.DataFrame({'year': list(current_isolated_years)})
                 counter_df = counter_df.join(isolated_years_df, on='year', how='anti')
 
             # 3.判断哪些需要启动倒计时
@@ -586,9 +604,13 @@ class DataExpirationMonitor:
             logger.error(f"获取数据年份失败: {e}")
             return set()
 
-    def _cleanup_isolated_years(self, isolated_years: set[int]):
-        """清理孤岛年份的所有数据"""
-        if not isolated_years:
+    def _cleanup_isolated_years(self, new_isolated_years: set[int]):
+        """清理新增孤岛年份的所有数据
+
+        Args:
+            new_isolated_years: 新增的孤岛年份集合，这些年份之前未被标记过
+        """
+        if not new_isolated_years:
             return
 
         # 获取清理时间配置
@@ -599,7 +621,7 @@ class DataExpirationMonitor:
 
         try:
             # 清理每个孤岛年份的数据
-            for year in isolated_years:
+            for year in new_isolated_years:
                 # 查找该年份的所有计数器
                 counter_pattern = f"{REDIS_PREFIX_MANAGER.counter_prefix}:{year}:*"
                 cursor = 0
@@ -637,10 +659,10 @@ class DataExpirationMonitor:
             # 执行清理
             if cleanup_count > 0:
                 cleanup_pipeline.execute()
-                logger.info(f"已设置 {cleanup_count} 个孤岛数据 {isolated_data_exp} 秒后清理")
+                logger.info(f"已设置 {cleanup_count} 个新增孤岛数据 {isolated_data_exp} 秒后清理")
 
         except Exception as e:
-            logger.error(f"清理孤岛年份失败: {e}")  
+            logger.error(f"清理新增孤岛年份失败: {e}")  
 
     def start(self):
         with self._lock:
