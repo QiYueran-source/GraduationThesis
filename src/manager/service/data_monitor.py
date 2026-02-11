@@ -428,8 +428,9 @@ class DataExpirationMonitor:
 
     def _expiration_loop(self):
         """数据过期循环
-        1.遍历所有数据计数器，如果计数器的计数大于等于node_num * clean_up_threshold，则启动倒计时，倒计时结束后，删除数据  
-        2.如果计数==node_num，则删除数据  
+        1.遍历所有数据计数器，如果计数器的计数大于等于node_num * clean_up_threshold，则启动倒计时，倒计时结束后，删除数据
+        2.如果计数==node_num，则删除数据
+        3.检测和清理孤岛数据（不与当前加载年份连续的过期年份）
         """
         while self.started:
             counter_df = self._get_all_counter()  # 获取所有数据计数器
@@ -461,8 +462,18 @@ class DataExpirationMonitor:
 
             # 从df中移除这些数据
             counter_df = counter_df.join(all_visited_df, on=['year','month','code'], how='anti')
-            
-            # 2.判断哪些需要启动倒计时
+
+            # 2.检测和清理孤岛数据（不与当前加载年份连续的过期年份）
+            isolated_years = self._detect_isolated_years()
+            if isolated_years:
+                self._cleanup_isolated_years(isolated_years)
+
+            # 从df中移除孤岛年份的数据
+            if isolated_years and not counter_df.is_empty():
+                isolated_years_df = pl.DataFrame({'year': list(isolated_years)})
+                counter_df = counter_df.join(isolated_years_df, on='year', how='anti')
+
+            # 3.判断哪些需要启动倒计时
             clean_up_threshold = self._expiration_param.get('clean_up_threshold', 0.85)
             clean_up_countdown = self._expiration_param.get('clean_up_countdown', 300)
             need_countdown_df = counter_df.filter(pl.col('count') >= self._get_node_num() * clean_up_threshold)
@@ -487,7 +498,149 @@ class DataExpirationMonitor:
                 lambda: self.started,
                 check_interval=1.0,
             ):
-                break  
+                break
+
+    def _detect_isolated_years(self) -> set[int]:
+        """检测孤岛年份：不与当前加载年份连续的过期年份
+
+        逻辑：
+        1. 获取当前所有数据年份（通过train数据键）
+        2. 从最大年份开始向前检查连续性
+        3. 找到第一个断开点，返回断开点及之前的所有年份作为孤岛数据
+        """
+        try:
+            # 获取当前存在的所有年份
+            years = self._get_all_data_years()
+            if not years:
+                return set()
+
+            # 排序年份
+            sorted_years = sorted(years)
+            logger.debug(f"当前数据年份: {sorted_years}")
+
+            if len(sorted_years) <= 1:
+                return set()
+
+            # 从最大年份开始向前检查连续性
+            max_year = sorted_years[-1]
+            isolated_years = set()
+
+            # 检查连续段
+            current_streak = [max_year]
+
+            for i in range(len(sorted_years) - 2, -1, -1):  # 从倒数第二个开始向前
+                current_year = sorted_years[i]
+                expected_next = current_streak[-1] - 1
+
+                if current_year == expected_next:
+                    # 连续，继续添加
+                    current_streak.append(current_year)
+                else:
+                    # 断开了，前面的所有年份都标记为孤岛数据
+                    break
+
+            # 如果有连续段，则断开点之前的所有年份都作为孤岛数据
+            if len(current_streak) < len(sorted_years):
+                # 找到断开点
+                break_point = current_streak[-1] - 1
+                isolated_years = set(year for year in sorted_years if year <= break_point)
+
+                if isolated_years:
+                    logger.info(f"检测到时间断开点 {break_point}，发现 {len(isolated_years)} 个孤岛年份: {sorted(isolated_years)}")
+
+            return isolated_years
+
+        except Exception as e:
+            logger.error(f"检测孤岛年份失败: {e}")
+            return set()
+
+    def _get_all_data_years(self) -> set[int]:
+        """获取当前Redis中存在的所有数据年份（通过train数据键）"""
+        pattern = f"{REDIS_PREFIX_MANAGER.train_prefix}:*"
+        years = set()
+        cursor = 0
+
+        try:
+            while True:
+                cursor, keys = self.client.scan(
+                    cursor=cursor,
+                    match=pattern,
+                    count=1000
+                )
+
+                for key in keys:
+                    parts = key.split(':')
+                    if len(parts) >= 4:
+                        try:
+                            year = int(parts[3])
+                            years.add(year)
+                        except (ValueError, IndexError):
+                            continue
+
+                if cursor == 0:
+                    break
+
+            return years
+
+        except Exception as e:
+            logger.error(f"获取数据年份失败: {e}")
+            return set()
+
+    def _cleanup_isolated_years(self, isolated_years: set[int]):
+        """清理孤岛年份的所有数据"""
+        if not isolated_years:
+            return
+
+        # 获取清理时间配置
+        isolated_data_exp = self._expiration_param.get('isolated_data_exp', 60)
+
+        cleanup_pipeline = self.client.pipeline(transaction=False)
+        cleanup_count = 0
+
+        try:
+            # 清理每个孤岛年份的数据
+            for year in isolated_years:
+                # 查找该年份的所有计数器
+                counter_pattern = f"{REDIS_PREFIX_MANAGER.counter_prefix}:{year}:*"
+                cursor = 0
+
+                while True:
+                    cursor, keys = self.client.scan(
+                        cursor=cursor,
+                        match=counter_pattern,
+                        count=1000
+                    )
+
+                    for counter_key in keys:
+                        # 从计数器键提取年月代码
+                        parts = counter_key.split(':')
+                        if len(parts) >= 6:
+                            try:
+                                year_val = int(parts[-3])
+                                month_val = int(parts[-2])
+                                code_val = parts[-1]
+
+                                # 构建对应的数据片键
+                                slice_key = REDIS_PREFIX_MANAGER.build_train_slice_key(year_val, month_val, code_val)
+
+                                # 添加到清理队列
+                                cleanup_pipeline.expire(counter_key, isolated_data_exp)
+                                cleanup_pipeline.expire(slice_key, isolated_data_exp)
+                                cleanup_count += 1
+
+                            except (ValueError, IndexError):
+                                continue
+
+                    if cursor == 0:
+                        break
+
+            # 执行清理
+            if cleanup_count > 0:
+                cleanup_pipeline.execute()
+                logger.info(f"已设置 {cleanup_count} 个孤岛数据 {isolated_data_exp} 秒后清理")
+
+        except Exception as e:
+            logger.error(f"清理孤岛年份失败: {e}")  
 
     def start(self):
         with self._lock:
