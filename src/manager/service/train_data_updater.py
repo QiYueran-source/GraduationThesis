@@ -172,11 +172,13 @@ class TrainDataUpdater:
             sorted_factors = [v for k, v in sorted(row.items())]
             slice_value = json.dumps([sorted_factors, monthly_return])
             
-            # 构建Redis键并加入管道
+            # 构建Redis键并加入管道（顺序：先计数器，后数据片）
             train_slice_key = REDIS_PREFIX_MANAGER.build_train_slice_key(year, month, code)
             counter_key = REDIS_PREFIX_MANAGER.build_counter_key(year, month, code)
-            redis_pipeline.set(train_slice_key, slice_value, ex=7200) # 存储数据片
-            redis_pipeline.set(counter_key, 0, ex=7200) # 初始化计数器为0
+            # 1. 先创建计数器（标记数据即将存在）
+            redis_pipeline.set(counter_key, 0, ex=7200)
+            # 2. 再创建数据片
+            redis_pipeline.set(train_slice_key, slice_value, ex=7200)
         
         # 3. 执行批量写入
         redis_pipeline.execute()
