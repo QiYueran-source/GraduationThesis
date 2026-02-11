@@ -104,11 +104,20 @@ class TrainDataUpdater:
         return_df = pl.DataFrame(return_df_dicts).with_columns(date_parse_expr)
 
         # 5. 数据类型校验（因子列转为数值型，避免字符串导致后续计算失败）
-        factors_df = factors_df.with_columns(
-            [pl.col(f).cast(pl.Float64, strict=False) for f in self.factors]
-        )
+        # 填充空值和NaN为0.0
+        # 只对因子列进行精确填充
+        factors_df = factors_df.with_columns([
+            pl.col(f).cast(pl.Float64, strict=False)
+                    .fill_null(0.0)
+                    .fill_nan(0.0)
+                    .alias(f)
+            for f in self.factors
+        ])
+
         return_df = return_df.with_columns(
             pl.col('monthly_return').cast(pl.Float64, strict=False)
+                                    .fill_null(0.0)
+                                    .fill_nan(0.0)
         )
 
         # 6. 过滤非法数据
@@ -154,30 +163,33 @@ class TrainDataUpdater:
             # 按stkcd和accper去重（避免重复数据）
             combined_df = combined_df.unique(subset=['stkcd', 'accper'], keep='last')
         
-        # 2. 分组填充（先forward再backward，最后补0，按stkcd分组）
-        fill_exprs = [
-            pl.col(col)
-            .over(
-                partition_by='stkcd',       # 按股票分组
-                order_by='accper',          # 分组内按时间排序（关键！保证填充顺序）
-                descending=False            # 时间从早到晚排序
-            ) 
-            .fill_null(strategy='forward')       # 前向填充（优先用历史值）
-            .fill_null(strategy='backward')      # 后向填充（补充剩余空值）
-            .fill_null(value=0.0)                # 兜底填0
-            .fill_nan(value=0.0)                 # NaN填0
-            .alias(col)
-            for col in self.factors + ['monthly_return']
-        ]
-        
-        clean_df = combined_df.with_columns(fill_exprs)
-    
+        # 2. 分组，循环填充（先forward，后补0，按stkcd分组）
+        clean_df = None
+        numeric_cols = self.factors + ['monthly_return']
+        for stkcd in combined_df['stkcd'].unique():
+            stkcd_df = combined_df.filter(pl.col('stkcd') == stkcd).select(common_cols)
+            clean_stk_df = stkcd_df.with_columns([
+                pl.col(f).cast(pl.Float64, strict=False)  # 先转换为数值类型
+                    .fill_nan(None)                    # 然后填充NaN
+                    .fill_null(strategy='forward')
+                    .fill_null(value=0)
+                    .alias(f)
+                for f in numeric_cols
+            ])
+            if clean_df is None:
+                clean_df = clean_stk_df
+            else:
+                clean_df = clean_df.vstack(clean_stk_df)
+
         # 3. 过滤当前年份数据（仅保留处理的年度数据）
         clean_df = clean_df.filter(pl.col('accper').dt.year() == self.now_year)
         
         # 4. 校验填充结果
         null_counts = clean_df.select([pl.col(col).is_null().sum() for col in self.factors + ['monthly_return']])
         #logger.debug(f"填充后空值统计：{null_counts.to_dict()}")
+
+        # 5.设置latest_df
+        self.latest_df = clean_df
         
         return clean_df
 

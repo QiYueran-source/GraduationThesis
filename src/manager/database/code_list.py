@@ -21,7 +21,7 @@ def get_code_list(
     quality_threshold: float = None
 ) -> List[str]:
     if code_type == 'test':
-        return ['000001','000002','000004','000005','000006','000007','000008','000009','000010']
+        return ['000001','000002','000004','000005','000006','000007','000008','000009','000010','000zzz']
     elif code_type == 'all':
         return _get_all_codes_with_quality_check(quality_threshold)
     else:
