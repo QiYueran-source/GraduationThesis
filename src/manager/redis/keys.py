@@ -28,6 +28,7 @@ class RedisPrefixManager:
                     - 收益率df：gt:data:df:{{year}}:return_df
                 - 训练数据片前缀: gt:data:train:{{year}}:{{month}}:{{code}}   
                 - 计数器前缀: gt:data:counter:{{year}}:{{month}}:{{code}} 次数  
+                - df已过期年份 gt:data:deleted_df_year:{{year}}
         """
         # 定义前缀 
         self._project_prefix = 'gt'
@@ -41,6 +42,7 @@ class RedisPrefixManager:
         self._train_data_prefix = 'train'
         self._df_prefix = 'df'
         self._counter_prefix = 'counter'
+        self._deleted_df_year_prefix = 'deleted_df_year'
 
         # 定义键
         self.message_bus_queue_key = 'Q'
@@ -164,6 +166,14 @@ class RedisPrefixManager:
         """
         month_str = f"{month:02d}"  # 格式化为两位数，如 01, 02
         return ":".join([self.counter_prefix, str(year), month_str, code])
+
+    ## 构建df过期年份键
+    def build_deleted_df_year_key(self,year:int):
+        f"""
+        构建过期df键
+        例如: gt:data:deleted_df_year:2000
+        """
+        return ":".join([self.data_prefix, self._deleted_df_year_prefix, year])
 
 
 

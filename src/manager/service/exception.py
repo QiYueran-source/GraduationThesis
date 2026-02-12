@@ -7,3 +7,6 @@ class ServiceConfigurationException(ServiceException):
 
 class ServiceInitException(ServiceException):
     '''服务初始化异常'''  
+
+class DataExpException(ServiceException):
+    '''数据过期异常'''

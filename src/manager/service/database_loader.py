@@ -65,20 +65,28 @@ class DatabaseLoader:
             factors_df = DatabaseLoader._fill_missing_data(factors_df, factors_complete_primary_keys, "factors")
             return_df = DatabaseLoader._fill_missing_data(return_df, return_complete_primary_keys, "return")
 
-    
-            # 保存数据 
-            self.client.set(
-                name = REDIS_PREFIX_MANAGER.build_df_key(each_year,'factors_df'),
-                value = json.dumps(factors_df.to_dicts()),
-                ex=7200
-            )
-            self.client.set(
-                name = REDIS_PREFIX_MANAGER.build_df_key(each_year,'return_df'),
-                value = json.dumps(return_df.to_dicts()),
-                ex=7200
-            )  
-            logger.info(f"处理数据加载请求: 加载请求{message['payload']['request_id']}的{each_year}年数据")
+            # 调试信息
+            print(f'==== DB {each_year} ====')
+            print(factors_df.head(2))
+            print(return_df.head(2))
 
+            # 保存数据 
+            try:
+                self.client.set(
+                    name = REDIS_PREFIX_MANAGER.build_df_key(each_year,'factors_df'),
+                    value = json.dumps(factors_df.to_dicts()),
+                    ex=7200
+                )
+                self.client.set(
+                    name = REDIS_PREFIX_MANAGER.build_df_key(each_year,'return_df'),
+                    value = json.dumps(return_df.to_dicts()),
+                    ex=7200
+                )  
+                logger.info(f"处理数据加载请求: 加载请求{message['payload']['request_id']}的{each_year}年数据")
+            except Exception as e:
+                logger.error(f'保存df失败：{each_year}, {e}')
+                raise Exception
+                     
             # 发布数据加载完成事件 
             payload = DataLoadedPayload(
                 request_id=message['payload']['request_id'],

@@ -14,8 +14,8 @@ meta:
   start_year: 1997
   end_year: 2024
   earliest_year_month: [1997, 1]
-  n: 1
-  max_portfolios_num: 1
+  n: 5
+  max_portfolios_num: 252
   env_config:
     sample_and_shuffle_seed: 42 # 证券采样和洗牌的种子，保证所有的节点都使用相同的证券采样和洗牌
     rl_end_year: 2020   # 强化学习结束年份，月份默认 12

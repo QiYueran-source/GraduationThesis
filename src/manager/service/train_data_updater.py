@@ -22,6 +22,7 @@ from src.manager.service.message import (
     DataLoadedMessage,DataLoadedPayload,
     TrainDataUpdatedMessage,TrainDataUpdatedPayload
 )
+from src.manager.service.exception import DataExpException
 
 # 日志
 from src.utils.logger import get_module_logger
@@ -73,6 +74,12 @@ class TrainDataUpdater:
 
         # 2. 重试机制：解决时序竞争问题
         for attempt in range(max_retries):
+            # 查看是否被删除
+            is_deleted = self.client.get(REDIS_PREFIX_MANAGER.build_deleted_df_year_key(year))
+            if is_deleted:
+                logger.info(f'{year}年份数据已过期，不再加载')
+                raise DataExpException(f'{year} df数据已经过期')
+
             # 读取并校验数据
             factors_raw = self.client.get(factors_key)
             return_raw = self.client.get(return_key)
@@ -86,7 +93,8 @@ class TrainDataUpdater:
                 logger.warning(f"年份{year}的因子/收益率数据暂不存在，重试 {attempt + 1}/{max_retries}，等待 {retry_delay}s")
                 time.sleep(retry_delay)
             else:
-                raise ValueError(f"年份{year}的因子/收益率数据在重试{max_retries}次后仍不存在")
+                logger.error(f"年份{year}的因子/收益率数据在重试{max_retries}次后仍不存在")
+                raise Exception 
 
         # 3. 解析JSON并转为DataFrame（增加异常处理）
         try:
@@ -94,7 +102,7 @@ class TrainDataUpdater:
             return_df_dicts = json.loads(return_raw)
         except json.JSONDecodeError as e:
             raise Exception(f"年份{year}的JSON数据解析失败: {e}") from e
-
+        
         # 4. 转为Polars DF + 日期转换（容错+指定时区）
         date_parse_expr = pl.col('accper').str.strptime(
             pl.Date, format='%Y-%m-%d', strict=False  # strict=False跳过非法日期
@@ -238,7 +246,12 @@ class TrainDataUpdater:
             # 1.加载df  
             year = message['payload']['year']
             self.now_year = year
-            factors_df, return_df = self._load_data_from_redis(year)
+            
+            try:
+                factors_df, return_df = self._load_data_from_redis(year)
+            except DataExpException as e:
+                logger.warning(e + ' 跳过')
+                return 
             
             # 2.因子标准化（按 accper 分组，对每个因子进行 z-score 标准化）
             # 标准化公式: (x - mean) / std
@@ -261,8 +274,10 @@ class TrainDataUpdater:
             self._store_data_slices(clean_df)
 
             # 6.移除当前year的df
+            self.client.set(REDIS_PREFIX_MANAGER.build_deleted_df_year_key(self.now_year), 1, ex = 7200)
             self.client.delete(REDIS_PREFIX_MANAGER.build_df_key(self.now_year,'factors_df'))
             self.client.delete(REDIS_PREFIX_MANAGER.build_df_key(self.now_year,'return_df'))
+            
 
             # 7.发布事件  
             MESSAGE_BUS.publish(
