@@ -43,6 +43,7 @@ class DataRedundancyMonitor:
         self.loader_year = [] # 已加载年份
         self.waiting_for_update = False # 等待数据更新  
         self.req_count = 0 # 请求记录
+        self.loaded_year = set[int]() # 已加载年份(避免检查间隔过短导致频繁发布)  
 
         # 配置
         self._stock_pool_param = {}
@@ -159,6 +160,7 @@ class DataRedundancyMonitor:
         - 检测当前的年份  
         - 如果 已有年份<=min，则加载 max-已有年份 的数据进入（发布加载事件）  
         - 年份前进 max-已有年份  
+        - 加载的年份，计入_loader_year_cache中，不加载这个缓存中的年份  
         - 如果年份>=最大年份，则退出监控循环（等待由任务启动时统一发 waiting）
         - 发布加载事件后，设置等待=True,直到监听到更新成功事件后，才继续监控
         """
@@ -188,12 +190,20 @@ class DataRedundancyMonitor:
             # 如果不足，发布加载事件(次数为)
             load_years = self._redundancy_param.get('max_periods_year',2) - loaded_year_count
             self.req_count+=1 # req计数器+1
-            year_list = [self.now_year + i for i in range(1, load_years+1) if self.now_year + i <= end_year]
+            year_list = [
+                            year 
+                            for year in range(self.now_year + 1, self.now_year + load_years + 1) 
+                            if year <= end_year and 
+                            year not in self.loaded_year
+                        ]
             
             # 如果 year_list 为空且 now_year >= end_year，退出监控循环
-            if not year_list and self.now_year >= end_year:
+            if self.now_year >= end_year:
                 logger.info(f'year_list 为空且 now_year={self.now_year} >= end_year={end_year}，退出监控循环')
                 break
+            if not year_list:
+                logger.debug('需要加载的年份为空，不发布消息')
+                continue
             
             payload = LoadRequestPayload(
                 year_list=year_list,
@@ -209,6 +219,10 @@ class DataRedundancyMonitor:
                 message = load_message
             )
             logger.info(f'发布数据加载事件，加载年份:{payload["year_list"]}')
+
+            # 发布后立即添加到loaded_year（乐观更新）
+            self.loaded_year.update(year_list)
+            logger.debug(f'添加到已加载列表: {sorted(year_list)}')
 
             # 发布后，进入循环等待，直到更新事件完成
             self.waiting_for_update = True
@@ -407,7 +421,7 @@ class DataExpirationMonitor:
                         continue
                     key_parts = key.split(":")
                     if len(key_parts) < 6:
-                        print(f"无效的 Redis 键格式：{key}，跳过")
+                        logger.warning(f"无效的 Redis 键格式：{key}，跳过")
                         continue
                     year = int(key_parts[-3])
                     month = int(key_parts[-2])

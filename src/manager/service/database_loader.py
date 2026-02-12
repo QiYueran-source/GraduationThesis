@@ -65,11 +65,6 @@ class DatabaseLoader:
             factors_df = DatabaseLoader._fill_missing_data(factors_df, factors_complete_primary_keys, "factors")
             return_df = DatabaseLoader._fill_missing_data(return_df, return_complete_primary_keys, "return")
 
-            # 调试信息
-            print(f'==== DB {each_year} ====')
-            print(factors_df.head(2))
-            print(return_df.head(2))
-
             # 保存数据 
             try:
                 self.client.set(
