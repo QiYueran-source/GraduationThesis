@@ -173,7 +173,7 @@ class RedisPrefixManager:
         构建过期df键
         例如: gt:data:deleted_df_year:2000
         """
-        return ":".join([self.data_prefix, self._deleted_df_year_prefix, year])
+        return ":".join([self.data_prefix, self._deleted_df_year_prefix, str(year)])
 
 
 

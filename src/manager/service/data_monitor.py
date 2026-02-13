@@ -165,7 +165,7 @@ class DataRedundancyMonitor:
         - 发布加载事件后，设置等待=True,直到监听到更新成功事件后，才继续监控
         """
         count = 0 # 记录监控次数  
-        end_year = self._meta_param.get('end_year', 2025)
+        end_year = self._meta_param.get('end_year', 2024)
 
         while self.started:
             # 检查是否到达 end_year（仅退出循环，不再发布 waiting，由任务启动时统一发 waiting）
@@ -312,24 +312,24 @@ class DataRedundancyMonitor:
         - 更新 now_year
         """
         with self._lock:  # 🔒 加锁保护共享状态
-                request_id = message.get('payload', {}).get('request_id', 0)
-                year = message.get('payload', {}).get('year', 0)  # 获取加载的年份
+            request_id = message.get('payload', {}).get('request_id', 0)
+            year = message.get('payload', {}).get('year', 0)  # 获取加载的年份
+            
+            if request_id == self.req_count:
+                # ✅ 更新 now_year（确保不倒退）
+                if year > self.now_year:
+                    self.now_year = year
+                    logger.info(f'now_year 更新为: {self.now_year}')
                 
-                if request_id == self.req_count:
-                    # ✅ 更新 now_year（确保不倒退）
-                    if year > self.now_year:
-                        self.now_year = year
-                        logger.info(f'now_year 更新为: {self.now_year}')
-                    
-                    # ✅ 更新等待状态
-                    self.waiting_for_update = False
-                    logger.info(f'收到匹配的更新消息，req_id: {request_id}，year: {year}')
-                    
-                elif request_id < self.req_count:
-                    logger.debug(f'收到较早的更新消息，req_id: {request_id}，当前等待: {self.req_count}，继续等待')
-                else:
-                    logger.error(f'收到未来的更新消息，req_id: {request_id}，当前等待: {self.req_count}，异常')
-                    raise 
+                # ✅ 更新等待状态
+                self.waiting_for_update = False
+                logger.info(f'收到匹配的更新消息，req_id: {request_id}，year: {year}')
+                
+            elif request_id < self.req_count:
+                logger.debug(f'收到较早的更新消息，req_id: {request_id}，当前等待: {self.req_count}，继续等待')
+            else:
+                logger.error(f'收到未来的更新消息，req_id: {request_id}，当前等待: {self.req_count}，异常')
+                raise 
     
     def start_handler(self,message:Message):
         """注册启动事件  

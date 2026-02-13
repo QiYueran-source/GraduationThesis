@@ -250,7 +250,7 @@ class TrainDataUpdater:
             try:
                 factors_df, return_df = self._load_data_from_redis(year)
             except DataExpException as e:
-                logger.warning(e + ' 跳过')
+                logger.warning(f'{e}, 跳过')
                 return 
             
             # 2.因子标准化（按 accper 分组，对每个因子进行 z-score 标准化）
