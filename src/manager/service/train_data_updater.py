@@ -44,6 +44,10 @@ class TrainDataUpdater:
         # 线程锁，保证一次只处理一个年份的数据
         self.lock = Lock()
 
+        # 配置
+        self._updater_retry_config = {}
+        self._risk_free_rate = 0.00
+
         # 加载配置
         self._load_config()
 
@@ -56,10 +60,12 @@ class TrainDataUpdater:
             with open('src/config/hyparam.yaml', 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
                 self._updater_retry_config = config.get('updater_retry', {})
+                self._risk_free_rate = float(config.get('meta',{}).get('performance_config',{}).get('risk_free_rate', 0.00))
         except Exception as e:
             logger.error(f"加载updater_retry配置失败: {e}")
             # 默认配置
             self._updater_retry_config = {'max_retries': 5, 'retry_delay': 1.0}
+            self._risk_free_rate = 0.00
 
     # 数据片加载
     def _load_data_from_redis(self, year: int) -> tuple[pl.DataFrame, pl.DataFrame]:
@@ -172,8 +178,8 @@ class TrainDataUpdater:
             combined_df = combined_df.unique(subset=['stkcd', 'accper'], keep='last')
         
         # 2. 分组，循环填充（先forward，后补0，按stkcd分组）
+        # 填充因子: forward + 0
         clean_df = None
-        numeric_cols = self.factors + ['monthly_return']
         for stkcd in combined_df['stkcd'].unique():
             stkcd_df = combined_df.filter(pl.col('stkcd') == stkcd).select(common_cols)
             clean_stk_df = stkcd_df.with_columns([
@@ -182,12 +188,21 @@ class TrainDataUpdater:
                     .fill_null(strategy='forward')
                     .fill_null(value=0)
                     .alias(f)
-                for f in numeric_cols
+                for f in self.factors
             ])
             if clean_df is None:
                 clean_df = clean_stk_df
             else:
                 clean_df = clean_df.vstack(clean_stk_df)
+        
+        # 填充收益率：无风险收益  
+        clean_df = clean_df.with_columns(
+            pl.col('monthly_return')
+                .cast(pl.Float64, strict=False)
+                .fill_nan(None)
+                .fill_null(self._risk_free_rate)
+                .alias('monthly_return')
+        )
 
         # 3. 过滤当前年份数据（仅保留处理的年度数据）
         clean_df = clean_df.filter(pl.col('accper').dt.year() == self.now_year)

@@ -341,6 +341,7 @@ class NodeManager:
             'max_portfolios_num': int(meta.get('max_portfolios_num', 500)),
             'env_config': dict(copy.deepcopy(meta.get('env_config') or {})),
             'performance_config': dict(copy.deepcopy(meta.get('performance_config') or {})),
+            'short_limit': float(meta.get('short_limit', 0.0)),
             'factors_list': [],  # 由节点本地提供
         }
 
