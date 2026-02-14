@@ -339,7 +339,7 @@ class NodeManager:
 
         # 从配置文件读取reward_config范围设置
         rw_cfg = tc.get('reward_config') or {}
-        keys = ['rtr', 'vol', 'sharpe', 'max_drawdown']
+        keys = ['rtr', 'vol', 'sharpe', 'max_drawdown', 'diversification']
 
         # 为每个权重从配置中读取范围，如果没有配置则使用默认值
         raw = []

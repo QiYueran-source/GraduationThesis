@@ -3,36 +3,38 @@
 
 # 股票池与数据质量
 stock_pool:
-  pool_type: test # test, 
+  pool_type: test # test, all, balance, clean
+  data_filter:
+    exclude_st: true                    # 是否排除ST股票
+    fill_return_loss: true          # 是否排除收益率损失 
   data_quality_threshold: 0.8
 
-data_filter:
-  exclude_st: true                    # 是否排除ST股票
-  fill_return_loss: true          # 是否排除收益率损失 
+
 
 meta_seed: 42
 
 # 节点 meta：由主机提供
 # 【顶层 = 固定】
 meta:
-  start_year: 1997
-  end_year: 2024
+  start_year: 2010
+  end_year: 2020
   earliest_year_month: [1997, 1]
-  n: 5
+  n: 1
   max_portfolios_num: 252
-  short_limit: 0.0 # 做空限制，负数  
+  short_limit: -0.3 # 做空限制，负数  
   env_config:
     sample_and_shuffle_seed: 42 # 证券采样和洗牌的种子，保证所有的节点都使用相同的证券采样和洗牌
-    rl_end_year: 2020   # 强化学习结束年份，月份默认 12
+    rl_end_year: 2015   # 强化学习结束年份，月份默认 12
     save_model_every_n_steps: 2500    # 每 2500 步保存一次模型
     save_record_every_n_steps: 300    # 每 300 步保存一次记录
     save_performance_and_reward_every_n_steps: 2500  # 每 2500 步保存一次表现和奖励快照
     box_max: 1 # 决策的最大值 
-    box_min: 0 # 决策的最小值  
+    box_min: -1 # 决策的最小值  
   performance_config:
     risk_free_rate: 0.00
     rolling_window: 24
     std_window: 24
+    std_floor: 0.01 # 标准差下限，避免标准差太小导致归一化结果不稳定  
 
   # 【train_config = 随机】下面为 range/选项，由 node_manager 随机采样
   train_config:
@@ -40,7 +42,7 @@ meta:
     m_range: [12, 12] # [1, 12]
     mask_len_range: [88, 88] # [44, 88]
     model_config:
-      cate_type: [0]  
+      cate_type: [2]  
       dropout_range: [0.00, 0.25]
       # config 按 cate 选择；cate=1 用 tcn_config，cate=2 用 lstm_config 采样
       tcn_config:
@@ -61,6 +63,7 @@ meta:
       vol_range: [0.1, 0.9]        # vol 权重范围
       sharpe_range: [0.1, 0.9]     # sharpe 权重范围
       max_drawdown_range: [0.1, 0.9]  # max_drawdown 权重范围
+      diversification_range: [0.1, 0.9]  # diversification 分散度 权重范围
 
 # redis 数据冗余配置
 redis_redundancy:
