@@ -244,6 +244,39 @@ class NodeManager:
                 return (int(parts[0].strip()), int(parts[1].strip()))
         return (1997, 1)
 
+    def _sample_model_config_by_cate(self, model_cfg: Dict[str, Any], cate: int, rng: random.Random) -> Dict[str, Any]:
+        """按 cate 从 hyparam 的 tcn_config / lstm_config 采样生成 model_config.config；cate=0 返回空或固定 config。"""
+        def sample_int_range(d: Dict[str, Any], key: str) -> Optional[int]:
+            r = d.get(key)
+            if r is None or not isinstance(r, (list, tuple)) or len(r) < 2:
+                return None
+            return rng.randint(int(r[0]), int(r[1]))
+
+        if cate == 1:
+            tcn = model_cfg.get('tcn_config') or {}
+            length = sample_int_range(tcn, 'num_channels_len_range')
+            if length is None:
+                length = 2
+            length = max(1, min(3, length))
+            ch_range = tcn.get('num_channels_range')
+            if ch_range and isinstance(ch_range, (list, tuple)) and len(ch_range) >= 2:
+                num_channels = [rng.randint(int(ch_range[0]), int(ch_range[1])) for _ in range(length)]
+            else:
+                num_channels = [64] * length
+            kernel_options = tcn.get('kernel_size_options')
+            kernel_size = int(rng.choice(kernel_options)) if kernel_options else 3
+            return {'num_channels': num_channels, 'kernel_size': kernel_size}
+
+        if cate == 2:
+            lstm = model_cfg.get('lstm_config') or {}
+            hidden_size = sample_int_range(lstm, 'hidden_size_range') or 64
+            num_layers = sample_int_range(lstm, 'num_layers_range') or 1
+            bidir_opts = lstm.get('bidirectional_options')
+            bidirectional = bool(rng.choice(bidir_opts)) if bidir_opts else False
+            return {'hidden_size': hidden_size, 'num_layers': num_layers, 'bidirectional': bidirectional}
+
+        return model_cfg.get('config', {})
+
     def _sample_train_config(self, tc: Dict[str, Any], rng: random.Random) -> Dict[str, Any]:
         """根据 hyparam.meta.train_config 的 range 生成单条 train_config（Node 端格式）。仅含随机项：seed, m, mask_len, model_config, reinforcement_config, reward_config。"""
         out: Dict[str, Any] = {}
@@ -276,7 +309,9 @@ class NodeManager:
         if dropout is None:
             dropout = 0.0
         if isinstance(cate_type, list) and cate_type:
-            out['model_config'] = {'cate': rng.choice(cate_type), 'config': model_cfg.get('config', {}), 'dropout': dropout}
+            cate = rng.choice(cate_type)
+            config = self._sample_model_config_by_cate(model_cfg, cate, rng)
+            out['model_config'] = {'cate': cate, 'config': config, 'dropout': dropout}
         else:
             out['model_config'] = {'cate': 0, 'config': {}, 'dropout': dropout}
 
