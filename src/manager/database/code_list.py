@@ -1,7 +1,7 @@
 """
 证券列表加载
 """
-import calendar
+import json
 from typing import Literal, List
 import polars as pl
 import yaml
@@ -11,6 +11,10 @@ from src.manager.database.connection import (
     CONNECTION_URL,
     ENGINE,
 )
+from src.manager.redis import REDIS_CONNECTOR, REDIS_PREFIX_MANAGER
+
+# 异常
+from src.manager.database.exception import DatabaseReadException
 
 # 日志
 from src.utils.logger import get_module_logger
@@ -29,13 +33,57 @@ except Exception as e:
     stock_pool_data_filter = {}
     stock_pool_data_quality_threshold = 0.8
 
-def get_code_list(**kwargs) -> List[str]:
+def _get_all_code_list() -> List[str]:
+    """
+    获取所有股票代码列表
+    来自 statics.public_code_in_both_factors_and_return 视图
+    返回 stkcd 列的所有证券代码列表
+    """
+    query = """
+        SELECT DISTINCT stkcd
+        FROM statics.public_code_in_both_factors_and_return
+        ORDER BY stkcd
+    """
+    try:
+        df = pl.read_database_uri(
+            uri=CONNECTION_URL,
+            query=query,
+            engine=ENGINE,
+        )
+        return df['stkcd'].cast(pl.Utf8).to_list()
+    except Exception as e:
+        logger.error(f"读取证券列表失败: {e}")
+        raise DatabaseReadException(f"读取证券列表失败: {e}")
+
+def read_db_to_get_code_list() -> List[str]:
+    """
+    从数据库中读取股票代码列表并写入 Redis
+    """
     # 接收参数
     pool_type = stock_pool_type
     data_filter = stock_pool_data_filter
     data_quality_threshold = stock_pool_data_quality_threshold
 
     # 1 
-    return ['000001', '000002', '000003', '000004', '000005', '000006', '000007', '000008', '000009', '000010']
+    if pool_type == 'test':
+        return ['000001', '000002', '000003', '000004', '000005', '000006', '000007', '000008', '000009', '000010']
+    elif pool_type == 'all':
+        return _get_all_code_list()
+    else:
+        raise ValueError(f"不支持的 pool_type: {pool_type}")
 
+def get_code_list(**kwargs) -> List[str]:
+    """从 Redis meta 中获取股票代码列表；若无 meta 或 stock_list 则回退到 read_db_to_get_code_list()"""
+    client = REDIS_CONNECTOR.get_client()
+    meta_key = REDIS_PREFIX_MANAGER.build_meta_key()
+    raw = client.get(meta_key)
+    if raw:
+        try:
+            meta = json.loads(raw)
+            stock_list = meta.get('stock_list')
+            if stock_list and isinstance(stock_list, list):
+                return list(stock_list)
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(f"解析 meta 失败: {e}，回退到 read_db_to_get_code_list")
+    return read_db_to_get_code_list()
 

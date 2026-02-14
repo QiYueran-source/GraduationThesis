@@ -46,7 +46,6 @@ class DataRedundancyMonitor:
         self.loaded_year = set[int]() # 已加载年份(避免检查间隔过短导致频繁发布)  
 
         # 配置
-        self._stock_pool_param = {}
         self._meta_param = {}
         self._redundancy_param = {}
 
@@ -72,8 +71,6 @@ class DataRedundancyMonitor:
             logger.error(f"加载配置失败: {e}")
             raise ServiceConfigurationException(f"加载配置失败: {e}")
         
-        # 分离配置（弃用 train，改用 stock_pool + meta）
-        self._stock_pool_param = config.get('stock_pool', {})
         self._meta_param = config.get('meta', {})
         self._redundancy_param = config.get('redis_redundancy', {})
 
@@ -207,7 +204,6 @@ class DataRedundancyMonitor:
             
             payload = LoadRequestPayload(
                 year_list=year_list,
-                stock_pool=self._stock_pool_param.get('pool_type', 'test'),
                 request_id=self.req_count
             )
             load_message = LoadRequestMessage(

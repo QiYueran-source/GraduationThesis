@@ -39,13 +39,11 @@ class DatabaseLoader:
         self._subscribe_handlers()
     
     def load_data_handler(self, message: Message):
-        """处理数据加载请求"""
-        # 加载消息  
-        stock_pool = message['payload']['stock_pool']
+        """处理数据加载请求；证券列表从 get_code_list() 取（Redis meta）"""
         year_list = message['payload']['year_list']
         for each_year in year_list:
             # 加载数据
-            code_list = get_code_list(code_type = stock_pool)
+            code_list = get_code_list()
             factors_start_date = dt.date(each_year,1,1)
             factors_end_date = dt.date(each_year,12,31)
             return_start_date = dt.date(each_year,2,1)

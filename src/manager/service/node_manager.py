@@ -27,7 +27,7 @@ from src.manager.service.message import (
     WaitingMessage,WaitingPayload,
     ShutdownMessage,ShutdownPayload
 )
-from src.manager.database import get_code_list
+from src.manager.database import get_code_list, read_db_to_get_code_list
 from src.manager.service.bus import MESSAGE_BUS
 from src.manager.redis import REDIS_CONNECTOR, REDIS_PREFIX_MANAGER
 from src.utils.warn.deprecate import deprecated
@@ -41,7 +41,6 @@ class NodeManager:
     def __init__(self):
         # 配置 
         self._node_config = {}
-        self._stock_pool_param = {}
         self._meta_param = {}
         self._meta_seed = None  
 
@@ -65,13 +64,12 @@ class NodeManager:
         self._subscribe()
 
     def _load_config(self):
-        """加载配置：node.yaml 为节点/端口配置，hyparam.yaml 为股票池与 meta 配置。"""
+        """加载配置：node.yaml 为节点/端口配置，hyparam.yaml 为 meta 配置（stock_pool 由 code_list 读取）。"""
         try:
             with open('src/config/node.yaml', 'r', encoding='utf-8') as f:
                 self._node_config = yaml.safe_load(f) or {}
             with open('src/config/hyparam.yaml', 'r', encoding='utf-8') as f:
                 hyparam = yaml.safe_load(f) or {}
-            self._stock_pool_param = hyparam.get('stock_pool', {})
             self._meta_param = hyparam.get('meta', {})
             self._meta_seed = hyparam.get('meta_seed', None)
         except Exception as e:
@@ -359,10 +357,9 @@ class NodeManager:
         return out
 
     def generate_shared_meta(self, task_id: str) -> Dict[str, Any]:
-        """生成所有节点共享的meta配置（不含train_config）"""
+        """生成所有节点共享的meta配置（不含train_config）；stock_list 由 read_db_to_get_code_list 读库得到并写入 Redis，后续 get_code_list 从 meta 取"""
         meta = self._meta_param or {}
-        pool_type = self._stock_pool_param.get('pool_type', 'test')
-        stock_list = get_code_list(code_type=pool_type)
+        stock_list = read_db_to_get_code_list()
 
         return {
             'task_id': task_id,

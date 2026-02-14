@@ -12,14 +12,9 @@ class StartMessagePayload(TypedDict):
     pass 
 
 class LoadRequestPayload(TypedDict):
-    """数据加载请求payload  
-    year_list: List[str]  # [2023, 2024]
-    stock_pool: str       # "test" | "hs300" | "zz500"
-    request_id: int       # 1 
-    """
+    """数据加载请求 payload；证券列表由 database_loader 通过 get_code_list() 从 Redis meta 获取"""
     year_list: List[int]  # [2023, 2024]
-    stock_pool: str       # "test" | "hs300" | "zz500"
-    request_id: int # 1
+    request_id: int
     
 
 class DataLoadedPayload(TypedDict):
