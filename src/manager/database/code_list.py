@@ -2,6 +2,7 @@
 证券列表加载
 """
 import json
+import random
 from typing import List, Optional
 import polars as pl
 import yaml
@@ -28,6 +29,9 @@ try:
     stock_pool_type = stock_pool_config.get('pool_type', 'test')
     stock_pool_data_filter = stock_pool_config.get('data_filter', {})
     stock_pool_data_quality_threshold = stock_pool_config.get('data_quality_threshold', 0.8)
+    segment_num = int(stock_pool_config.get('segment_num', 1))
+    segment_cursor = int(stock_pool_config.get('segment_cursor', 1))
+    segment_seed = int(stock_pool_config.get('segment_seed', 42))
     meta_config = config.get('meta', {})
     meta_start_year = int(meta_config.get('start_year', 1997))
     meta_end_year = int(meta_config.get('end_year', 2024))
@@ -36,6 +40,7 @@ except Exception as e:
     stock_pool_type = 'test'
     stock_pool_data_filter = {}
     stock_pool_data_quality_threshold = 0.8
+    segment_num, segment_cursor, segment_seed = 1, 1, 42
     meta_config = {}
     meta_start_year, meta_end_year = 1997, 2024
 
@@ -187,18 +192,44 @@ def read_db_to_get_code_list() -> List[str]:
 
     return result_code_list
 
+
+def _segment_list(
+    lst: List[str],
+    segment_num: int,
+    segment_cursor: int,
+    segment_seed: int,
+) -> List[str]:
+    """按 seed 打乱后等分成 segment_num 段，返回第 segment_cursor 段（1-based）。"""
+    if not lst or segment_num <= 1:
+        return lst
+    rng = random.Random(segment_seed)
+    lst = list(lst)
+    rng.shuffle(lst)
+    n = len(lst)
+    segment_num = min(segment_num, n)
+    base, r = divmod(n, segment_num)
+    sizes = [base + 1] * r + [base] * (segment_num - r)
+    cursor = max(1, min(segment_cursor, segment_num))
+    start = sum(sizes[: cursor - 1])
+    end = start + sizes[cursor - 1]
+    return lst[start:end]
+
+
 def get_code_list(**kwargs) -> List[str]:
-    """从 Redis meta 中获取股票代码列表；若无 meta 或 stock_list 则回退到 read_db_to_get_code_list()"""
+    """从 Redis meta 中获取股票代码列表；若无 meta 或 stock_list 则回退到 read_db_to_get_code_list()。按 stock_pool 的 segment_* 打乱并返回指定分段。"""
     client = REDIS_CONNECTOR.get_client()
     meta_key = REDIS_PREFIX_MANAGER.build_meta_key()
     raw = client.get(meta_key)
+    full_list: List[str] = []
     if raw:
         try:
             meta = json.loads(raw)
             stock_list = meta.get('stock_list')
             if stock_list and isinstance(stock_list, list):
-                return list(stock_list)
+                full_list = list(stock_list)
         except (json.JSONDecodeError, TypeError) as e:
             logger.warning(f"解析 meta 失败: {e}，回退到 read_db_to_get_code_list")
-    return read_db_to_get_code_list()
+    if not full_list:
+        full_list = read_db_to_get_code_list()
+    return _segment_list(full_list, segment_num, segment_cursor, segment_seed)
 
