@@ -27,6 +27,8 @@ class DataLoadedPayload(TypedDict):
 
 class TrainDataUpdatedPayload(TypedDict):
     """训练数据更新payload"""
+    request_id: int             # 1 相应loadrequest的id
+    year:int                    # 2024 一次只提供一个年份
     first:bool                  # 是否是第一次发布 
 
 

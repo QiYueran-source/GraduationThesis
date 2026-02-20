@@ -109,13 +109,27 @@ class TrainDataUpdater:
         except json.JSONDecodeError as e:
             raise Exception(f"年份{year}的JSON数据解析失败: {e}") from e
         
-        # 4. 转为Polars DF + 日期转换（容错+指定时区）
+        # 4. 定义schema并转为Polars DF + 日期转换（容错+指定时区）
+        # factors schema
+        factors_schema = {
+            'stkcd': pl.Utf8,
+            'accper': pl.Utf8,
+        }
+        factors_schema.update({factor: pl.Float64 for factor in self.factors})
+
+        # return schema
+        return_schema = {
+            'stkcd': pl.Utf8,
+            'accper': pl.Utf8,
+            'monthly_return': pl.Float64
+        }
+
         date_parse_expr = pl.col('accper').str.strptime(
             pl.Date, format='%Y-%m-%d', strict=False  # strict=False跳过非法日期
         ).fill_null(pl.date(1900,1,1))  # 非法日期转为1900-01-01，后续过滤
 
-        factors_df = pl.DataFrame(factors_df_dicts).with_columns(date_parse_expr)
-        return_df = pl.DataFrame(return_df_dicts).with_columns(date_parse_expr)
+        factors_df = pl.DataFrame(factors_df_dicts, schema=factors_schema).with_columns(date_parse_expr)
+        return_df = pl.DataFrame(return_df_dicts, schema=return_schema).with_columns(date_parse_expr)
 
         # 5. 数据类型校验（因子列转为数值型，避免字符串导致后续计算失败）
         # 填充空值和NaN为0.0
@@ -300,10 +314,13 @@ class TrainDataUpdater:
                     message_type = 'train_data_updated',
                     publisher = 'TrainDataUpdater',
                     payload = TrainDataUpdatedPayload(
+                        request_id = message['payload']['request_id'],
+                        year = self.now_year,
                         first = self.first  
                     )
                 )
             )
+            
             if self.first:
                 self.first = False # 第一次发布后，设置为False  
 

@@ -302,9 +302,9 @@ class DataRedundancyMonitor:
         logger.info('数据冗余监控器已完全停止')
         return True
 
-    def data_loaded_handler(self,message:Message):
-        """注册更新事件
-        - 解除waiting状态
+    def train_data_updated_handler(self, message: Message):
+        """处理训练数据更新事件
+        - 解除 waiting 状态
         - 更新 now_year
         """
         with self._lock:  # 🔒 加锁保护共享状态
@@ -341,7 +341,7 @@ class DataRedundancyMonitor:
 
     def _subscribe(self):
         MESSAGE_BUS.subscribe('start',self.start_handler,'DataRedundancyMonitor')
-        MESSAGE_BUS.subscribe('data_loaded',self.data_loaded_handler,'DataRedundancyMonitor')
+        MESSAGE_BUS.subscribe('train_data_updated', self.train_data_updated_handler, 'DataRedundancyMonitor')
         MESSAGE_BUS.subscribe('shutdown',self.shutdown_handler,'DataRedundancyMonitor')
 
 DATA_REDUNDANCY_MONITOR = DataRedundancyMonitor()
