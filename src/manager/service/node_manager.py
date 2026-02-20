@@ -354,6 +354,15 @@ class NodeManager:
 
         total = sum(raw)
         out['reward_config'] = {'reward_weights': {k: v / total for k, v in zip(keys, raw)}}
+
+        # 经典效用函数风险系数 A：N(0, 1) 采样，并按配置范围裁剪
+        a_cfg = rw_cfg.get('A')
+        if a_cfg is not None and isinstance(a_cfg, (list, tuple)) and len(a_cfg) >= 2:
+            low, high = float(a_cfg[0]), float(a_cfg[1])
+            a_val = rng.gauss(0.0, 1.0)
+            a_val = max(low, min(high, a_val))
+            out['reward_config']['A'] = a_val
+
         return out
 
     def generate_shared_meta(self, task_id: str) -> Dict[str, Any]:
