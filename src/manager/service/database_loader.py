@@ -35,6 +35,9 @@ class DatabaseLoader:
         # redis客户端
         self.client = REDIS_CONNECTOR.get_client()
 
+        # 证券列表
+        self.code_list = get_code_list()
+
         # 注册处理器
         self._subscribe_handlers()
     
@@ -43,7 +46,7 @@ class DatabaseLoader:
         year_list = message['payload']['year_list']
         for each_year in year_list:
             # 加载数据
-            code_list = get_code_list()
+            code_list = self.code_list
             factors_start_date = dt.date(each_year,1,1)
             factors_end_date = dt.date(each_year,12,31)
             return_start_date = dt.date(each_year,2,1)
