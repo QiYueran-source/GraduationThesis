@@ -17,6 +17,7 @@ import requests
 import random
 import copy
 import threading
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional, Dict, Any, Tuple
 
@@ -406,6 +407,8 @@ class NodeManager:
 
         for i in range(num):
             train_config = self._sample_train_config(tc_template, rng)
+            canonical = json.dumps(train_config, sort_keys=True)
+            train_config['config_uuid'] = str(uuid.uuid5(uuid.NAMESPACE_DNS, canonical))
             train_configs.append(train_config)
 
         logger.info(f"生成 {num} 个节点的 train_config")
