@@ -32,6 +32,8 @@ try:
     segment_num = int(stock_pool_config.get('segment_num', 1))
     segment_cursor = int(stock_pool_config.get('segment_cursor', 1))
     segment_seed = int(stock_pool_config.get('segment_seed', 42))
+    _increment = stock_pool_config.get('increment', False)
+    increment = int(_increment) if _increment not in (False, None) and str(_increment).isdigit() else False
     meta_config = config.get('meta', {})
     meta_start_year = int(meta_config.get('start_year', 1997))
     meta_end_year = int(meta_config.get('end_year', 2024))
@@ -41,6 +43,7 @@ except Exception as e:
     stock_pool_data_filter = {}
     stock_pool_data_quality_threshold = 0.8
     segment_num, segment_cursor, segment_seed = 1, 1, 42
+    increment = False
     meta_config = {}
     meta_start_year, meta_end_year = 1997, 2024
 
@@ -193,6 +196,41 @@ def read_db_to_get_code_list() -> List[str]:
     return result_code_list
 
 
+def read_db_to_get_code_list_for_range(start_year: int, end_year: int) -> List[str]:
+    """按给定年份范围从数据库读取代码列表（与 read_db_to_get_code_list 逻辑一致，仅年份可指定）。用于 increment 差集。"""
+    pool_type = stock_pool_type
+    data_filter = stock_pool_data_filter
+    data_quality_threshold = stock_pool_data_quality_threshold
+    if pool_type == 'test':
+        return ['000001', '000002', '000003', '000004', '000005', '000006', '000007', '000008', '000009', '000010']
+    all_code_list = _get_all_code_list()
+    result_code_list = None
+    if pool_type == 'all':
+        result_code_list = all_code_list
+    elif pool_type == 'balance':
+        df = _get_return_stats(stkcd_list=all_code_list, start_year=start_year, end_year=end_year)
+        result_code_list = df['stkcd'].cast(pl.Utf8).to_list()
+    elif pool_type == 'clean':
+        df = _get_return_stats()
+        threshold_pct = data_quality_threshold * 100
+        df = df.filter(pl.col('data_completeness_pct') >= threshold_pct)
+        result_code_list = df['stkcd'].cast(pl.Utf8).to_list()
+    elif pool_type == 'balance_and_clean':
+        df = _get_return_stats(start_year=start_year, end_year=end_year)
+        threshold_pct = data_quality_threshold * 100
+        df = df.filter(pl.col('data_completeness_pct') >= threshold_pct)
+        result_code_list = df['stkcd'].cast(pl.Utf8).to_list()
+    else:
+        raise ValueError(f"不支持的 pool_type: {pool_type}")
+    if data_filter.get('exclude_st', False):
+        st_code_list = _get_st_code_list()
+        result_code_list = [code for code in result_code_list if code not in st_code_list]
+    if data_filter.get('exclude_fin', False):
+        fin_code_list = _get_fin_code_list()
+        result_code_list = [code for code in result_code_list if code not in fin_code_list]
+    return result_code_list
+
+
 def _segment_list(
     lst: List[str],
     segment_num: int,
@@ -231,5 +269,10 @@ def get_code_list(**kwargs) -> List[str]:
             logger.warning(f"解析 meta 失败: {e}，回退到 read_db_to_get_code_list")
     if not full_list:
         full_list = read_db_to_get_code_list()
+    # 增量模式：剔除「increment 年～end_year」中已有证券，仅保留当前窗口中新出现的
+    if full_list and increment and isinstance(increment, int) and not isinstance(increment, bool) and increment < meta_start_year:
+        set_old = set(read_db_to_get_code_list_for_range(increment, meta_end_year))
+        full_list = [c for c in full_list if c not in set_old]
+        logger.info(f"increment={increment}，剔除 {len(set_old)} 只已有证券，剩余 {len(full_list)} 只")
     return _segment_list(full_list, segment_num, segment_cursor, segment_seed)
 
