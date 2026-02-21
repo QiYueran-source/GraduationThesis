@@ -393,6 +393,7 @@ class NodeManager:
             'env_config': dict(copy.deepcopy(meta.get('env_config') or {})),
             'performance_config': dict(copy.deepcopy(meta.get('performance_config') or {})),
             'short_limit': float(meta.get('short_limit', 0.0)),
+            'checkpoint': bool(meta.get('checkpoint', False)),
             'factors_list': [],  # 由节点本地提供
         }
 
