@@ -203,6 +203,15 @@ class NodeManager:
         logger.info(f"可用端口数: {len(available_ports)}, 端口: {available_ports}")
         return available_ports
 
+    def _get_port_range(self) -> Tuple[int, int, int]:
+        """从配置读取端口范围，返回 (start_port, end_port, port_count)。"""
+        web = self._node_config.get('web', {})
+        pr = web.get('port_range', [8191, 8220])
+        start_port = int(pr[0])
+        end_port = int(pr[1])
+        port_count = end_port - start_port + 1
+        return start_port, end_port, port_count
+
     def get_all_running_task_port(self, task_id: str) -> List[str]:
         """
         获取运行指定 task_id 的所有端口
@@ -463,28 +472,25 @@ class NodeManager:
         return False
 
     def start_nodes(self, train_config_list: List[Dict[str, Any]], task_id: str) -> Tuple[int, int]:
-        """按可用端口顺序向各节点下发 train_config 启动任务。
-        - 先 get_all_available_port()，取前 len(train_config_list) 个端口与 train_config_list 一一对应下发。
-        - 返回 (成功数, 失败数)。
+        """按端口在范围内的下标分配 train_config：端口 port 固定使用 train_config_list[port - start_port]，通过 TCP 下发。
+        同一端口多次运行获得相同 config；某端口挂了不影响其他端口的分配。
         """
         if not train_config_list:
             return 0, 0
         web = self._node_config.get('web', {})
         host = web.get('node_host', 'localhost')
-        available_str = self.get_all_available_port()  # 返回字符串列表
-        
-        # 转换为整数列表
-        available = [int(port) for port in available_str]
-        if len(available) < len(train_config_list):
-            logger.warning(f"可用端口数 {len(available)} 小于 train_config 数 {len(train_config_list)}，仅启动前 {len(available)} 个节点")
-        ports = available[: len(train_config_list)]
+        start_port, _, _ = self._get_port_range()
+        available_str = self.get_all_available_port()
+        available = [int(p) for p in available_str]
         ok, fail = 0, 0
-        for port, train_config in zip(ports, train_config_list):
-            if self._start_single_node(host, port, train_config, task_id):
-                ok += 1
-            else:
-                fail += 1
-        logger.info(f"节点启动完成: 成功 {ok}, 失败 {fail}, 共 {len(train_config_list)} 条 train_config")
+        for port in available:
+            index = port - start_port
+            if 0 <= index < len(train_config_list):
+                if self._start_single_node(host, port, train_config_list[index], task_id):
+                    ok += 1
+                else:
+                    fail += 1
+        logger.info(f"节点启动完成: 成功 {ok}, 失败 {fail}, 共 {len(available)} 个可用端口（train_config 共 {len(train_config_list)} 份，按端口下标分配）")
         return ok, fail
 
     # ============================ 停止节点 ============================
@@ -808,11 +814,7 @@ class NodeManager:
     # ============================ init / start 消息handler ============================
     def _init_node_info_with_port_count(self) -> None:
         """在启动冗余监控前，将 node_info 的 node_num 初始化为配置的暴露端口数量，避免过期监控误删数据。"""
-        web = self._node_config.get('web', {})
-        pr = web.get('port_range', [8191, 8220])
-        start_port = int(pr[0])
-        end_port = int(pr[1])
-        port_count = end_port - start_port + 1
+        start_port, end_port, port_count = self._get_port_range()
         node_info_key = REDIS_PREFIX_MANAGER.build_node_info_key()
         node_info_data = {
             'node_num': str(port_count),
@@ -856,13 +858,13 @@ class NodeManager:
         time.sleep(30)
         logger.debug("等待 30s , 确保数据完成加载")
         
-        # 获取可用端口并启动节点
+        # 固定按端口范围数量生成 train_config，按端口下标分配（同一端口始终获得同一 config）
+        _, _, port_count = self._get_port_range()
+        train_config_list = self.generate_train_configs(num=port_count)
         available = self.get_all_available_port()
-        num = len(available)
-        if num == 0:
+        if len(available) == 0:
             logger.warning("无可用端口，跳过启动节点")
             return
-        train_config_list = self.generate_train_configs(num=num)
         ok, fail = self.start_nodes(train_config_list, task_id)
         logger.info(f"init_handler 完成：已启动节点 成功={ok}, 失败={fail}")
         
