@@ -3,12 +3,12 @@
 
 # 股票池与数据质量
 stock_pool:
-  pool_type: balance # test, all, balance, clean，balance_and_clean
+  pool_type: balance_and_clean # test, all, balance, clean，balance_and_clean
   data_filter:
     exclude_st: true                    # 是否排除ST股票
     exclude_fin: ture                   # 是否排除金融股票 
   data_quality_threshold: 0.8
-  segment_num: 5 # 分段数  
+  segment_num: 3 # 分段数  
   segment_cursor: 1 # 使用第1各分段  
   segment_seed: 43 # 分段种子    
 
@@ -23,31 +23,31 @@ meta:
   earliest_year_month: [1997, 1]
   n: 1
   max_portfolios_num: 5000
-  short_limit: -0.3 # 做空限制，负数  
+  short_limit: 0.0 # 做空限制，负数  
   env_config:
-    sample_and_shuffle_seed: 42 # 证券采样和洗牌的种子，保证所有的节点都使用相同的证券采样和洗牌
+    sample_and_shuffle_seed: 153 # 证券采样和洗牌的种子，保证所有的节点都使用相同的证券采样和洗牌
     rl_end_year: 2020  # 强化学习结束年份，月份默认 12
-    save_model_every_n_steps: 2500    # 每 2500 步保存一次模型
-    save_record_every_n_steps: 300    # 每 300 步保存一次记录
-    save_performance_and_reward_every_n_steps: 2500  # 每 2500 步保存一次表现和奖励快照
+    save_model_every_n_steps: 7500    # 每 7500 步保存一次模型
+    save_record_every_n_steps: 150    # 每 150 步保存一次记录
+    save_performance_and_reward_every_n_steps: 7500  # 每 7500 步保存一次表现和奖励快照
     box_max: 1 # 决策的最大值 
-    box_min: -0.3 # 决策的最小值  
+    box_min: -1 # 决策的最小值  
     retrain_times: 3 # 重训练次数  
   performance_config:
     risk_free_rate: 0.00
     rolling_window: 24
     std_window: 24
     std_floor: 0.01 # 标准差下限，避免标准差太小导致归一化结果不稳定  
-    classic_utility: true # 是否使用经典效用函数  
+    classic_utility: false # 是否使用经典效用函数  
 
   # 【train_config = 随机】下面为 range/选项，由 node_manager 随机采样
   train_config:
     seed_range: [1, 1000] # [1, 1000]
-    m_range: [12, 12] # [1, 12]
-    mask_len_range: [88, 88] # [44, 88]
+    m_range: [1, 1] # [1, 12]
+    mask_len_range: [60, 60] # [44, 88]
     model_config:
-      cate_type: [2]  
-      dropout_range: [0.00, 0.25]
+      cate_type: [0]  
+      dropout_range: [0.25, 0.25]
       # config 按 cate 选择；cate=1 用 tcn_config，cate=2 用 lstm_config 采样
       tcn_config:
         num_channels_range: [32, 128]    # 每层通道数采样范围
@@ -59,28 +59,28 @@ meta:
         bidirectional_options: [true, false]  # 是否双向
     reinforcement_config:
       cate: [0]
-      lr_range: [1e-5, 1e-3]
-      clip_grad_norm_range: [0.5, 1.0]
-      weight_decay_range: [0, 0.01]
+      lr_range: [5e-4, 5e-4]
+      clip_grad_norm_range: [0.5, 0.5]
+      weight_decay_range: [0.1, 0.1]
     reward_config:
-      rtr_range: [0.1, 0.9]        # rtr 权重范围
-      vol_range: [0.1, 0.9]        # vol 权重范围
-      sharpe_range: [0.1, 0.9]     # sharpe 权重范围
-      max_drawdown_range: [0.1, 0.9]  # max_drawdown 权重范围
-      diversification_range: [0.1, 0.9]  # diversification 分散度 权重范围
+      rtr_range: [1, 1]        # rtr 权重范围
+      vol_range: [0, 0]        # vol 权重范围
+      sharpe_range: [0, 0]     # sharpe 权重范围
+      max_drawdown_range: [0, 0]  # max_drawdown 权重范围
+      diversification_range: [0, 0]  # diversification 分散度 权重范围
       A: [0, 1] # 经典效用函数风险系数A，正态分布 N(0, 1)  
 
 # redis 数据冗余配置
 redis_redundancy:
   interval: 300
   min_periods_year: 1
-  max_periods_year: 2
+  max_periods_year: 3
 
 # redis 数据过期配置
 redis_expiration:
-  isolated_data_exp: 60 # 孤岛数据60s清除 
-  interval: 5
-  clean_up_threshold: 0.85
+  isolated_data_exp: 120 # 孤岛数据120 
+  interval: 60
+  clean_up_threshold: 0.80
   clean_up_countdown: 300
 
 updater_retry:

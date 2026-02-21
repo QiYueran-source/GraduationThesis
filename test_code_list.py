@@ -21,7 +21,10 @@ from src.manager.database.code_list import (
     _get_all_code_list,
     _get_return_stats,
     _get_fin_code_list,
-    _get_st_code_list
+    _get_st_code_list,
+    segment_num,
+    segment_cursor,
+    segment_seed,
 )
 
 # 日志
@@ -174,6 +177,31 @@ def test_read_db_to_get_code_list():
     return True
 
 
+def test_code_list_counts():
+    """当前配置下：不分段与分段分别展示 get_code_list 能获得多少代码"""
+    print("\n=== 当前配置下代码数量（不分段 vs 分段） ===")
+    try:
+        # 不分段：完整列表（read_db_to_get_code_list 不应用 segment 逻辑）
+        full_list = read_db_to_get_code_list()
+        full_count = len(full_list)
+        print(f"不分段（完整列表）: {full_count} 只")
+
+        # 分段：get_code_list() 会按 stock_pool 的 segment_* 打乱并取当前段
+        segmented_list = get_code_list()
+        segmented_count = len(segmented_list)
+        print(f"分段（当前配置）: {segmented_count} 只")
+        print(f"  配置: segment_num={segment_num}, segment_cursor={segment_cursor}, segment_seed={segment_seed}")
+
+        if segment_num > 1 and full_count > 0:
+            expected_per_segment = full_count // segment_num
+            print(f"  说明: 共 {segment_num} 段，当前为第 {segment_cursor} 段，约每段 {expected_per_segment}～{expected_per_segment + 1} 只")
+        print("✅ 代码数量展示完成")
+    except Exception as e:
+        print(f"❌ 测试失败: {e}")
+        return False
+    return True
+
+
 def test_get_code_list():
     """测试 get_code_list 主入口"""
     print("\n=== 测试 get_code_list 主入口 ===")
@@ -246,6 +274,7 @@ def run_all_tests():
         test_get_fin_code_list(),
         test_get_st_code_list(),
         test_read_db_to_get_code_list(),
+        test_code_list_counts(),
         test_get_code_list(),
         test_filtering_logic()
     ]
@@ -265,7 +294,7 @@ def run_all_tests():
 
 if __name__ == "__main__":
     try:
-        success = run_all_tests()
+        success = test_code_list_counts()
         sys.exit(0 if success else 1)
     except KeyboardInterrupt:
         print("\n用户中断测试")

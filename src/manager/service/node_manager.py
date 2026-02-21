@@ -366,9 +366,9 @@ class NodeManager:
         return out
 
     def generate_shared_meta(self, task_id: str) -> Dict[str, Any]:
-        """生成所有节点共享的meta配置（不含train_config）；stock_list 由 read_db_to_get_code_list 读库得到并写入 Redis，后续 get_code_list 从 meta 取"""
+        """生成所有节点共享的meta配置（不含train_config）；stock_list 由 get_code_list 取（含分段），与数据加载一致"""
         meta = self._meta_param or {}
-        stock_list = read_db_to_get_code_list()
+        stock_list = get_code_list()
 
         return {
             'task_id': task_id,

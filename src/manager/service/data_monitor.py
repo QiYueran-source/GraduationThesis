@@ -325,7 +325,9 @@ class DataRedundancyMonitor:
                 logger.debug(f'收到较早的更新消息，req_id: {request_id}，当前等待: {self.req_count}，继续等待')
             else:
                 logger.error(f'收到未来的更新消息，req_id: {request_id}，当前等待: {self.req_count}，异常')
-                raise 
+                raise RuntimeError(
+                    f'收到未来的更新消息，request_id={request_id}，当前等待 req_count={self.req_count}'
+                )
     
     def start_handler(self,message:Message):
         """注册启动事件  
