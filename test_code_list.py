@@ -18,6 +18,7 @@ import src.utils.set.set_pypath
 from src.manager.database.code_list import (
     get_code_list,
     read_db_to_get_code_list,
+    read_db_to_get_code_list_for_range,
     _get_all_code_list,
     _get_return_stats,
     _get_fin_code_list,
@@ -25,6 +26,9 @@ from src.manager.database.code_list import (
     segment_num,
     segment_cursor,
     segment_seed,
+    increment,
+    meta_start_year,
+    meta_end_year,
 )
 
 # 日志
@@ -178,22 +182,35 @@ def test_read_db_to_get_code_list():
 
 
 def test_code_list_counts():
-    """当前配置下：不分段与分段分别展示 get_code_list 能获得多少代码"""
-    print("\n=== 当前配置下代码数量（不分段 vs 分段） ===")
+    """当前配置下：总证券、增量证券、分段证券数量展示"""
+    print("\n=== 当前配置下代码数量（总证券 / 增量证券 / 分段证券） ===")
     try:
-        # 不分段：完整列表（read_db_to_get_code_list 不应用 segment 逻辑）
+        # 总证券：当前窗口（start_year～end_year）完整列表
         full_list = read_db_to_get_code_list()
-        full_count = len(full_list)
-        print(f"不分段（完整列表）: {full_count} 只")
+        total_count = len(full_list)
+        print(f"总证券（当前窗口）: {total_count} 只")
 
-        # 分段：get_code_list() 会按 stock_pool 的 segment_* 打乱并取当前段
+        # 增量证券：若启用 increment，为 总证券 − (increment～end_year) 的证券数
+        if increment and isinstance(increment, int) and not isinstance(increment, bool) and increment < meta_start_year:
+            old_list = read_db_to_get_code_list_for_range(increment, meta_end_year)
+            increment_set = set(full_list) - set(old_list)
+            increment_count = len(increment_set)
+            print(f"增量证券（increment={increment}，剔除 {len(old_list)} 只）: {increment_count} 只")
+        else:
+            increment_count = total_count
+            if increment:
+                print(f"增量证券: {increment_count} 只（increment 未生效，需 increment < start_year）")
+            else:
+                print(f"增量证券: {increment_count} 只（increment 未启用）")
+
+        # 分段证券：get_code_list() 在增量基础上再分段的结果
         segmented_list = get_code_list()
         segmented_count = len(segmented_list)
-        print(f"分段（当前配置）: {segmented_count} 只")
+        print(f"分段证券（当前段）: {segmented_count} 只")
         print(f"  配置: segment_num={segment_num}, segment_cursor={segment_cursor}, segment_seed={segment_seed}")
 
-        if segment_num > 1 and full_count > 0:
-            expected_per_segment = full_count // segment_num
+        if segment_num > 1 and increment_count > 0:
+            expected_per_segment = increment_count // segment_num
             print(f"  说明: 共 {segment_num} 段，当前为第 {segment_cursor} 段，约每段 {expected_per_segment}～{expected_per_segment + 1} 只")
         print("✅ 代码数量展示完成")
     except Exception as e:
