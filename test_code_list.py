@@ -29,6 +29,7 @@ from src.manager.database.code_list import (
     increment,
     meta_start_year,
     meta_end_year,
+    code_list_start_year,
 )
 
 # 日志
@@ -190,8 +191,8 @@ def test_code_list_counts():
         total_count = len(full_list)
         print(f"总证券（当前窗口）: {total_count} 只")
 
-        # 增量证券：若启用 increment，为 总证券 − (increment～end_year) 的证券数
-        if increment and isinstance(increment, int) and not isinstance(increment, bool) and increment < meta_start_year:
+        # 增量证券：若启用 increment，为 总证券 − (increment～end_year) 的证券数（与 get_code_list 一致，用 code_list_start_year）
+        if increment and isinstance(increment, int) and not isinstance(increment, bool) and increment < code_list_start_year:
             old_list = read_db_to_get_code_list_for_range(increment, meta_end_year)
             increment_set = set(full_list) - set(old_list)
             increment_count = len(increment_set)
@@ -199,7 +200,7 @@ def test_code_list_counts():
         else:
             increment_count = total_count
             if increment:
-                print(f"增量证券: {increment_count} 只（increment 未生效，需 increment < start_year）")
+                print(f"增量证券: {increment_count} 只（increment 未生效，需 increment < code_list_start_year={code_list_start_year}）")
             else:
                 print(f"增量证券: {increment_count} 只（increment 未启用）")
 
@@ -247,6 +248,46 @@ def test_get_code_list():
     return True
 
 
+def test_mask_start_year():
+    """测试 stock_pool.mask_start_year：有值时取 code list 应使用该年作为起始年，否则用 meta.start_year"""
+    print("\n=== 测试 mask_start_year（断点续学起始年掩码） ===")
+    try:
+        import yaml
+        with open("src/config/hyparam.yaml", "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+        sp = config.get("stock_pool", {})
+        meta_cfg = config.get("meta", {})
+        mask_raw = sp.get("mask_start_year")
+        expected_start = int(mask_raw) if mask_raw is not None else int(meta_cfg.get("start_year", 1997))
+
+        print(f"  meta.start_year: {meta_start_year}")
+        print(f"  stock_pool.mask_start_year: {mask_raw}")
+        print(f"  code_list_start_year（实际取列表用）: {code_list_start_year}")
+
+        if code_list_start_year != expected_start:
+            print(f"  ❌ 期望 code_list_start_year={expected_start}，实际={code_list_start_year}")
+            return False
+
+        print(f"  ✅ mask_start_year 生效：取 code list 使用起始年 {code_list_start_year}")
+
+        # 可选：对 balance/balance_and_clean 验证列表与「用 code_list_start_year 过滤」一致
+        pool_type = sp.get("pool_type", "")
+        if pool_type in ("balance", "balance_and_clean"):
+            full = read_db_to_get_code_list()
+            from_range = read_db_to_get_code_list_for_range(code_list_start_year, meta_end_year)
+            if len(full) != len(from_range):
+                print(f"  ⚠️ read_db 列表数 {len(full)} 与 for_range({code_list_start_year},{meta_end_year}) 数 {len(from_range)} 不一致，请核查")
+            else:
+                print(f"  ✅ 列表数量与 for_range({code_list_start_year}, {meta_end_year}) 一致: {len(full)} 只")
+        return True
+    except FileNotFoundError:
+        print("  ⚠️ 未找到 src/config/hyparam.yaml，跳过 mask_start_year 校验")
+        return True
+    except Exception as e:
+        print(f"  ❌ 测试失败: {e}")
+        return False
+
+
 def test_filtering_logic():
     """测试过滤逻辑"""
     print("\n=== 测试过滤逻辑 ===")
@@ -291,6 +332,7 @@ def run_all_tests():
         test_get_fin_code_list(),
         test_get_st_code_list(),
         test_read_db_to_get_code_list(),
+        test_mask_start_year(),
         test_code_list_counts(),
         test_get_code_list(),
         test_filtering_logic()

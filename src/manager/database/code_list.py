@@ -37,6 +37,9 @@ try:
     meta_config = config.get('meta', {})
     meta_start_year = int(meta_config.get('start_year', 1997))
     meta_end_year = int(meta_config.get('end_year', 2024))
+    # 取 code list 时使用的起始年：若 stock_pool.mask_start_year 有值则用它（断点续学），否则用 meta.start_year
+    _mask = stock_pool_config.get('mask_start_year')
+    code_list_start_year = int(_mask) if _mask is not None else meta_start_year
 except Exception as e:
     logger.error(f"配置读取异常: {e}, 使用默认配置")
     stock_pool_type = 'test'
@@ -46,6 +49,7 @@ except Exception as e:
     increment = False
     meta_config = {}
     meta_start_year, meta_end_year = 1997, 2024
+    code_list_start_year = meta_start_year
 
 def _get_all_code_list() -> List[str]:
     """
@@ -166,7 +170,7 @@ def read_db_to_get_code_list() -> List[str]:
     if pool_type == 'all':
         result_code_list = all_code_list
     elif pool_type == 'balance':
-        df = _get_return_stats(stkcd_list=all_code_list, start_year=meta_start_year, end_year=meta_end_year)
+        df = _get_return_stats(stkcd_list=all_code_list, start_year=code_list_start_year, end_year=meta_end_year)
         balance_code_list = df['stkcd'].cast(pl.Utf8).to_list()
         result_code_list = balance_code_list
     elif pool_type == 'clean':
@@ -177,7 +181,7 @@ def read_db_to_get_code_list() -> List[str]:
         result_code_list = df['stkcd'].cast(pl.Utf8).to_list()
     elif pool_type == 'balance_and_clean':
         # 在 balance 上按数据完整度筛选
-        df = _get_return_stats(start_year=meta_start_year, end_year=meta_end_year)
+        df = _get_return_stats(start_year=code_list_start_year, end_year=meta_end_year)
         threshold_pct = data_quality_threshold * 100
         df = df.filter(pl.col('data_completeness_pct') >= threshold_pct)
         result_code_list = df['stkcd'].cast(pl.Utf8).to_list()
@@ -270,7 +274,7 @@ def get_code_list(**kwargs) -> List[str]:
     if not full_list:
         full_list = read_db_to_get_code_list()
     # 增量模式：剔除「increment 年～end_year」中已有证券，仅保留当前窗口中新出现的
-    if full_list and increment and isinstance(increment, int) and not isinstance(increment, bool) and increment < meta_start_year:
+    if full_list and increment and isinstance(increment, int) and not isinstance(increment, bool) and increment < code_list_start_year:
         set_old = set(read_db_to_get_code_list_for_range(increment, meta_end_year))
         full_list = [c for c in full_list if c not in set_old]
         logger.info(f"increment={increment}，剔除 {len(set_old)} 只已有证券，剩余 {len(full_list)} 只")

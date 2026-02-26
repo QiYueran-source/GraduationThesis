@@ -1,0 +1,92 @@
+# 超参数配置
+# 约定：顶层 = 固定（环境统一），train_config = 随机（agent 异质性）
+
+# 股票池与数据质量
+stock_pool:
+  pool_type: balance_and_clean # test, all, balance, clean，balance_and_clean
+  increment: 2014 # 是否使用增量，如果设置increment为false，不使用，设置为年份（如2004），而当前start_year = 2009，则获取2009~2024的code和2004~2024code的差集
+  mask_start_year: 2004 # 起始年份掩码，用于覆盖真正的起始年份，用于断点    
+  data_filter:
+    exclude_st: true                    # 是否排除ST股票
+    exclude_fin: true                   # 是否排除金融股票 
+  data_quality_threshold: 0.8
+  segment_num: 5 # 分段数  
+  segment_cursor: 1 # 使用第1个分段(1开始) 
+  segment_seed: 43 # 分段种子    
+
+# 种子
+meta_seed: 43
+
+# 节点 meta：由主机提供
+# 【顶层 = 固定】
+meta:
+  checkpoint: false # 是否启用断点增量  
+  start_year: 2019
+  end_year: 2024
+  earliest_year_month: [1997, 1]
+  n: 1
+  max_portfolios_num: 5000
+  short_limit: 0.0 # 做空限制，负数  
+  env_config:
+    sample_and_shuffle_seed: 153 # 证券采样和洗牌的种子，保证所有的节点都使用相同的证券采样和洗牌
+    rl_end_year: 2005  # 强化学习结束年份，月份默认 12
+    save_model_every_n_steps: 7500    # 每 7500 步保存一次模型
+    save_record_every_n_steps: 150    # 每 150 步保存一次记录
+    save_performance_and_reward_every_n_steps: 7500  # 每 7500 步保存一次表现和奖励快照
+    box_max: 1 # 决策的最大值 
+    box_min: -1 # 决策的最小值  
+    retrain_times: 1 # 重训练次数  
+  performance_config:
+    risk_free_rate: 0.00
+    rolling_window: 24
+    std_window: 24
+    std_floor: 0.01 # 标准差下限，避免标准差太小导致归一化结果不稳定  
+    classic_utility: true # 是否使用经典效用函数  
+
+  # 【train_config = 随机】下面为 range/选项，由 node_manager 随机采样
+  train_config:
+    # config_uuid: 配置唯一ID，用于断点增量    
+    seed_range: [1, 1000] # [1, 1000]
+    m_range: [12, 12] # [1, 12]
+    mask_len_range: [60, 60] # [44, 88]
+    model_config:
+      cate_type: [0]  
+      dropout_range: [0.25, 0.25]
+      # config 按 cate 选择；cate=1 用 tcn_config，cate=2 用 lstm_config 采样
+      tcn_config:
+        num_channels_range: [32, 128]    # 每层通道数采样范围
+        num_channels_len_range: [1, 3]   # 层数（列表长度 1～3）
+        kernel_size_options: [3, 5, 7]   # 卷积核大小
+      lstm_config:
+        hidden_size_range: [32, 128]     # 隐藏维数
+        num_layers_range: [1, 3]         # 层数
+        bidirectional_options: [true, false]  # 是否双向
+    reinforcement_config:
+      cate: [0]
+      lr_range: [5e-4, 5e-4]
+      clip_grad_norm_range: [0.5, 0.5]
+      weight_decay_range: [0.1, 0.1]
+    reward_config:
+      rtr_range: [1, 1]        # rtr 权重范围
+      vol_range: [0, 0]        # vol 权重范围
+      sharpe_range: [0, 0]     # sharpe 权重范围
+      max_drawdown_range: [0, 0]  # max_drawdown 权重范围
+      diversification_range: [0, 0]  # diversification 分散度 权重范围
+      A: [1, 0.16]  # 经典效用函数风险系数A，对数正态 A=exp(N(mu,sigma))，此处为底层正态 (mu, sigma)  
+
+# redis 数据冗余配置
+redis_redundancy:
+  interval: 300
+  min_periods_year: 1
+  max_periods_year: 3
+
+# redis 数据过期配置
+redis_expiration:
+  isolated_data_exp: 120 # 孤岛数据120 
+  interval: 60
+  clean_up_threshold: 0.80
+  clean_up_countdown: 300
+
+updater_retry:
+  max_retries: 10
+  retry_delay: 3

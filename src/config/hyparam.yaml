@@ -1,91 +1,117 @@
-# 超参数配置
-# 约定：顶层 = 固定（环境统一），train_config = 随机（agent 异质性）
-
-# 股票池与数据质量
 stock_pool:
-  pool_type: balance_and_clean # test, all, balance, clean，balance_and_clean
-  increment: false # 是否使用增量，如果设置increment为false，不使用，设置为年份（如2004），而当前start_year = 2009，则获取2009~2024的code和2004~2024code的差集  
+  pool_type: balance_and_clean
+  increment: 2009
+  mask_start_year: null # 开始年份掩码
   data_filter:
-    exclude_st: true                    # 是否排除ST股票
-    exclude_fin: ture                   # 是否排除金融股票 
+    exclude_st: true
+    exclude_fin: true
   data_quality_threshold: 0.8
-  segment_num: 7 # 分段数  
-  segment_cursor: 2 # 使用第1各分段  
-  segment_seed: 43 # 分段种子    
-
-# 种子
-meta_seed: 42
-
-# 节点 meta：由主机提供
-# 【顶层 = 固定】
+  segment_num: 1
+  segment_cursor: 1
+  segment_seed: 43
+meta_seed: 396
 meta:
-  checkpoint: true # 是否启用断点增量  
-  start_year: 2004
+  checkpoint: true
+  start_year: 2014
   end_year: 2024
-  earliest_year_month: [1997, 1]
+  earliest_year_month:
+  - 1997
+  - 1
   n: 1
   max_portfolios_num: 5000
-  short_limit: 0.0 # 做空限制，负数  
+  short_limit: 0.0
   env_config:
-    sample_and_shuffle_seed: 153 # 证券采样和洗牌的种子，保证所有的节点都使用相同的证券采样和洗牌
-    rl_end_year: 2024  # 强化学习结束年份，月份默认 12
-    save_model_every_n_steps: 7500    # 每 7500 步保存一次模型
-    save_record_every_n_steps: 150    # 每 150 步保存一次记录
-    save_performance_and_reward_every_n_steps: 7500  # 每 7500 步保存一次表现和奖励快照
-    box_max: 1 # 决策的最大值 
-    box_min: -1 # 决策的最小值  
-    retrain_times: 1 # 重训练次数  
+    sample_and_shuffle_seed: 153
+    rl_end_year: 2024
+    save_model_every_n_steps: 7500
+    save_record_every_n_steps: 6000
+    save_performance_and_reward_every_n_steps: 7500
+    box_max: 1
+    box_min: -1
+    retrain_times: 1
   performance_config:
-    risk_free_rate: 0.00
+    risk_free_rate: 0.0
     rolling_window: 24
     std_window: 24
-    std_floor: 0.01 # 标准差下限，避免标准差太小导致归一化结果不稳定  
-    classic_utility: false # 是否使用经典效用函数  
-
-  # 【train_config = 随机】下面为 range/选项，由 node_manager 随机采样
+    std_floor: 0.01
+    classic_utility: true
   train_config:
-    # config_uuid: 配置唯一ID，用于断点增量    
-    seed_range: [1, 1000] # [1, 1000]
-    m_range: [1, 1] # [1, 12]
-    mask_len_range: [60, 60] # [44, 88]
+    seed_range:
+    - 1
+    - 1000
+    m_range:
+    - 12
+    - 12
+    mask_len_range:
+    - 60
+    - 60
     model_config:
-      cate_type: [0]  
-      dropout_range: [0.25, 0.25]
-      # config 按 cate 选择；cate=1 用 tcn_config，cate=2 用 lstm_config 采样
+      cate_type:
+      - 0
+      dropout_range:
+      - 0.25
+      - 0.25
       tcn_config:
-        num_channels_range: [32, 128]    # 每层通道数采样范围
-        num_channels_len_range: [1, 3]   # 层数（列表长度 1～3）
-        kernel_size_options: [3, 5, 7]   # 卷积核大小
+        num_channels_range:
+        - 32
+        - 128
+        num_channels_len_range:
+        - 1
+        - 3
+        kernel_size_options:
+        - 3
+        - 5
+        - 7
       lstm_config:
-        hidden_size_range: [32, 128]     # 隐藏维数
-        num_layers_range: [1, 3]         # 层数
-        bidirectional_options: [true, false]  # 是否双向
+        hidden_size_range:
+        - 32
+        - 128
+        num_layers_range:
+        - 1
+        - 3
+        bidirectional_options:
+        - true
+        - false
     reinforcement_config:
-      cate: [0]
-      lr_range: [5e-4, 5e-4]
-      clip_grad_norm_range: [0.5, 0.5]
-      weight_decay_range: [0.1, 0.1]
+      cate:
+      - 0
+      lr_range:
+      - 5e-4
+      - 5e-4
+      clip_grad_norm_range:
+      - 0.5
+      - 0.5
+      weight_decay_range:
+      - 0.1
+      - 0.1
     reward_config:
-      rtr_range: [1, 1]        # rtr 权重范围
-      vol_range: [0, 0]        # vol 权重范围
-      sharpe_range: [0, 0]     # sharpe 权重范围
-      max_drawdown_range: [0, 0]  # max_drawdown 权重范围
-      diversification_range: [0, 0]  # diversification 分散度 权重范围
-      A: [0, 1] # 经典效用函数风险系数A，正态分布 N(0, 1)  
-
-# redis 数据冗余配置
+      rtr_range:
+      - 1
+      - 1
+      vol_range:
+      - 0
+      - 0
+      sharpe_range:
+      - 0
+      - 0
+      max_drawdown_range:
+      - 0
+      - 0
+      diversification_range:
+      - 0
+      - 0
+      A:
+      - 1
+      - 0.16
 redis_redundancy:
-  interval: 300
-  min_periods_year: 1
-  max_periods_year: 3
-
-# redis 数据过期配置
+  interval: 30
+  min_periods_year: 2
+  max_periods_year: 4
 redis_expiration:
-  isolated_data_exp: 120 # 孤岛数据120 
+  isolated_data_exp: 1200
   interval: 60
-  clean_up_threshold: 0.80
+  clean_up_threshold: 1
   clean_up_countdown: 300
-
 updater_retry:
   max_retries: 10
   retry_delay: 3

@@ -89,10 +89,10 @@ class DataRedundancyMonitor:
             if self.started:
                 logger.warning('数据冗余监控器已经启动')
                 return
-            
+
             # 设置启动标志
             self.started = True
-            
+
             # 启动监控线程
             self._monitor_thread = threading.Thread(
                 target=self._monitor_loop,
@@ -447,8 +447,8 @@ class DataExpirationMonitor:
     def _expiration_loop(self):
         """数据过期循环
         1.遍历所有数据计数器，如果计数器的计数大于等于node_num * clean_up_threshold，则启动倒计时，倒计时结束后，删除数据
-        2.如果计数==node_num，则删除数据
-        3.检测和清理孤岛数据（不与当前加载年份连续的过期年份）
+        2.如果计数>=node_num，则只删除数据片，保留计数器以便查看访问路径
+        3.检测和清理孤岛数据（不与当前加载年份连续的过期年份）：只对数据片设 TTL，保留计数器
         4.检测和清理高使用率数据（计数 >= node_num * clean_up_threshold），避免重复设置TTL
         """
         while self.started:
@@ -464,7 +464,7 @@ class DataExpirationMonitor:
                 continue  
 
             # 1.判断哪些已经被全部访问 
-            all_visited_df = counter_df.filter(pl.col('count') == self._get_node_num())
+            all_visited_df = counter_df.filter(pl.col('count') >= self._get_node_num())
 
             # 初始化删除用的 Pipeline
             delete_pipeline = self.client.pipeline(transaction=False)  # 非事务模式，更快
@@ -472,10 +472,8 @@ class DataExpirationMonitor:
                 # 批量收集删除命令（无需循环执行，一次性添加到 Pipeline）
                 for row in all_visited_df.to_dicts():
                     year, month, code = row['year'], row['month'], row['code']
-                    # 添加删除 train_slice 键的命令
+                    # 只删除 train_slice，保留 counter 便于查看访问路径
                     delete_pipeline.delete(REDIS_PREFIX_MANAGER.build_train_slice_key(year, month, code))
-                    # 添加删除 counter 键的命令
-                    delete_pipeline.delete(REDIS_PREFIX_MANAGER.build_counter_key(year, month, code))
                 # 一次性执行所有删除命令（核心优化！）
                 delete_pipeline.execute()
 
@@ -696,8 +694,7 @@ class DataExpirationMonitor:
                                 # 构建对应的数据片键
                                 slice_key = REDIS_PREFIX_MANAGER.build_train_slice_key(year_val, month_val, code_val)
 
-                                # 添加到清理队列
-                                cleanup_pipeline.expire(counter_key, isolated_data_exp)
+                                # 只对数据片设置过期，保留 counter 便于查看访问路径
                                 cleanup_pipeline.expire(slice_key, isolated_data_exp)
                                 cleanup_count += 1
 

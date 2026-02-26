@@ -9,6 +9,7 @@
     6.定时检查端口状态，如果所有端口运行完毕，发布结束消息  
 """
 # 库
+import math
 import yaml
 import time
 import json
@@ -365,12 +366,14 @@ class NodeManager:
         total = sum(raw)
         out['reward_config'] = {'reward_weights': {k: v / total for k, v in zip(keys, raw)}}
 
-        # 经典效用函数风险系数 A：N(0, 1) 采样，并按配置范围裁剪
+        # 经典效用函数风险系数 A：对数正态分布 A = exp(N(mu, sigma))，配置为 [mu, sigma]
         a_cfg = rw_cfg.get('A')
         if a_cfg is not None and isinstance(a_cfg, (list, tuple)) and len(a_cfg) >= 2:
-            low, high = float(a_cfg[0]), float(a_cfg[1])
-            a_val = rng.gauss(0.0, 1.0)
-            a_val = max(low, min(high, a_val))
+            mu, sigma = float(a_cfg[0]), float(a_cfg[1])
+            z = rng.gauss(mu, sigma)
+            a_val = math.exp(z)
+            # 裁剪到合理范围，避免数值问题
+            a_val = max(0.01, min(20.0, a_val))
             out['reward_config']['A'] = a_val
 
         return out
@@ -379,6 +382,20 @@ class NodeManager:
         """生成所有节点共享的meta配置（不含train_config）；stock_list 由 get_code_list 取（含分段），与数据加载一致"""
         meta = self._meta_param or {}
         stock_list = get_code_list()
+        if len(stock_list) == 0:
+            logger.error("get_code_list 返回空列表，发布 shutdown 并中止当前任务")
+            MESSAGE_BUS.publish(
+                message=ShutdownMessage(
+                    message_type="shutdown",
+                    publisher=self.__class__.__name__,
+                    payload=ShutdownPayload(
+                        reason="empty_stock_list",
+                        graceful=True,
+                        timeout=300,
+                    ),
+                )
+            )
+            raise ValueError("get_code_list 返回空，已发布 shutdown，请检查配置与数据后重跑")
 
         return {
             'task_id': task_id,
@@ -599,15 +616,23 @@ class NodeManager:
     def _monitor_loop(self):
         """
         节点监控循环
-        - 每 interval 秒查询所有节点状态，仅统计当前 task_id（Redis 中的 task_id）的节点
+        - 首次检查延后 interval×first_delay_multiplier 秒（默认 3 倍），避免启动时写出 node_num=0 导致数据过期误删
+        - 之后每 interval 秒查询所有节点状态，仅统计当前 task_id（Redis 中的 task_id）的节点
         - 保存到 Redis (gt:system:node_info)：node_num、last_update、nodes_record（三字段，无冗余）
         - 若无当前 task_id 或无在跑节点，则 node_num=0，nodes_record=[]，保留字段结构
         """
         monitor_config = self._node_config.get('monitor', {})
         interval = float(monitor_config.get('interval', 120))
-        
+        first_delay_multiplier = int(monitor_config.get('first_delay_multiplier', 3))
+
         logger.info(f"节点监控器启动，监控间隔: {interval} 秒")
-        
+
+        # 首次检查延后，避免启动时节点尚未就绪写出 node_num=0，导致数据过期逻辑按 1 删除
+        first_delay = interval * first_delay_multiplier
+        logger.info(f"首次节点检查延后 {first_delay:.0f} 秒（interval×{first_delay_multiplier}），避免误删未拉齐数据")
+        if not interruptible_sleep(first_delay, lambda: self.monitor_started, check_interval=1.0):
+            return
+
         while self.monitor_started:
             try:
                 # 当前 task_id 来自 Redis

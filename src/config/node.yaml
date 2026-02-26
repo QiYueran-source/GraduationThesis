@@ -10,4 +10,5 @@ web:
   timeout: 10 # 超时时间
   
 monitor:
-  interval: 120 # 每隔120秒请求一次状态，查看还有多少端口在运行  
+  interval: 360 # 每隔 N 秒请求一次状态，查看还有多少端口在运行
+  first_delay_multiplier: 2  # 首次节点检查延后 = interval×此值（默认3），避免启动时 node_num=0 导致数据过早过期，可选 4  

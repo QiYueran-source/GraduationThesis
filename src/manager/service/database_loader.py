@@ -62,12 +62,12 @@ class DatabaseLoader:
                 self.client.set(
                     name = REDIS_PREFIX_MANAGER.build_df_key(each_year,'factors_df'),
                     value = json.dumps(factors_df.to_dicts()),
-                    ex=7200
+                    ex=72000
                 )
                 self.client.set(
                     name = REDIS_PREFIX_MANAGER.build_df_key(each_year,'return_df'),
                     value = json.dumps(return_df.to_dicts()),
-                    ex=7200
+                    ex=72000
                 )  
                 logger.info(f"处理数据加载请求: 加载请求{message['payload']['request_id']}的{each_year}年数据")
             except Exception as e:

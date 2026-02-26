@@ -254,9 +254,9 @@ class TrainDataUpdater:
             train_slice_key = REDIS_PREFIX_MANAGER.build_train_slice_key(year, month, code)
             counter_key = REDIS_PREFIX_MANAGER.build_counter_key(year, month, code)
             # 1. 先创建计数器（标记数据即将存在）
-            redis_pipeline.set(counter_key, 0, ex=7200)
+            redis_pipeline.set(counter_key, 0, ex=72000)
             # 2. 再创建数据片
-            redis_pipeline.set(train_slice_key, slice_value, ex=7200)
+            redis_pipeline.set(train_slice_key, slice_value, ex=72000)
         
         # 3. 执行批量写入
         redis_pipeline.execute()
@@ -303,7 +303,7 @@ class TrainDataUpdater:
             self._store_data_slices(clean_df)
 
             # 6.移除当前year的df
-            self.client.set(REDIS_PREFIX_MANAGER.build_deleted_df_year_key(self.now_year), 1, ex = 7200)
+            self.client.set(REDIS_PREFIX_MANAGER.build_deleted_df_year_key(self.now_year), 1, ex = 72000)
             self.client.delete(REDIS_PREFIX_MANAGER.build_df_key(self.now_year,'factors_df'))
             self.client.delete(REDIS_PREFIX_MANAGER.build_df_key(self.now_year,'return_df'))
             
