@@ -1,0 +1,14 @@
+cat data/20260227_1516_baseline1_778167b9-99d7-42b7-95a8-cafdb64ff35c/meta.json | grep "seed"
+
+export task_id=20260227_1516_baseline1_778167b9-99d7-42b7-95a8-cafdb64ff35c &&
+export node_id=node_1772014595_27084 &&
+rsync -avz \
+  --include=record.json \
+  --include=meta.json \
+  --include=.end \
+  --include=performance_and_reward_*.jsonl \
+  --exclude='*' \
+  --password-file=/Node/rsync.passwd \
+  --port=8730 \
+  /Node/data/$task_id/ \
+  nodeuser@192.168.1.4::node_result/$task_id/$node_id/
