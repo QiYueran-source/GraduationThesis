@@ -36,4 +36,12 @@ else
   echo "未找到 result 目录，跳过复制"
 fi
 
-echo "备份完成：.ipynb 文件和 result 目录已复制到 ${DEST_DIR}"
+# 复制 empirical 目录（如果存在）
+if [ -d "${PROJECT_ROOT}/empirical" ]; then
+  echo "开始复制 empirical 目录到：${DEST_DIR}"
+  cp -rv "${PROJECT_ROOT}/empirical" "${DEST_DIR}/"
+else
+  echo "未找到 empirical 目录，跳过复制"
+fi
+
+echo "备份完成：.ipynb 文件、result 目录和 empirical 目录已复制到 ${DEST_DIR}"
