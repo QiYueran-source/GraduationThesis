@@ -659,19 +659,23 @@ class NodeManager:
                         'current_year_month': status.get('current_year_month'),
                     })
                 
-                node_num = len(current_nodes)
-                
-                # 三字段：node_num、last_update、nodes_record
+                # 活跃节点ID列表
+                running_node_ids = [node['node_id'] for node in current_nodes if node.get('node_id')]
+
+                # 两字段：running_nodes、last_update、nodes_record
                 node_info_key = REDIS_PREFIX_MANAGER.build_node_info_key()
                 node_info_data = {
-                    'node_num': str(node_num),
+                    'running_nodes': json.dumps(running_node_ids),
                     'last_update': str(int(time.time())),
                     'nodes_record': json.dumps(current_nodes, ensure_ascii=False),
                 }
                 self._redis_client.hset(node_info_key, mapping=node_info_data)
+
+                # 运行端口列表
+                running_ports = [node['port'] for node in current_nodes]
                 logger.info(
                     f"节点监控更新: 当前 task_id={current_task_id or '(无)'}, "
-                    f"运行节点数={node_num}"
+                    f"运行端口: {running_ports}"
                 )
                 
             except Exception as e:
