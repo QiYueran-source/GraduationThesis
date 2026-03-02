@@ -9,7 +9,8 @@ import threading
 from typing import Any,Optional
 import time
 import yaml
-from typing import Dict
+import json
+from typing import Dict, List
 from collections import defaultdict
 
 # 组件
@@ -368,9 +369,6 @@ class DataExpirationMonitor:
         # 孤岛年份跟踪
         self._marked_isolated_years = set()  # 已标记为孤岛的年份集合，避免重复设置TTL
 
-        # 高使用率数据清理跟踪
-        self._marked_for_cleanup = set()  # 已标记清理的数据片集合 (year, month, code)，避免重复设置TTL
-
         # 加载配置
         self._load_config()
 
@@ -387,33 +385,31 @@ class DataExpirationMonitor:
             logger.error(f"加载配置失败: {e}")
             raise 
 
-    def _get_node_num(self) -> int:
-        """获取node_info中的node_num"""
+    def _get_running_nodes(self) -> List[str]:
+        """获取活跃节点ID列表"""
         node_info = self.client.hgetall(REDIS_PREFIX_MANAGER.build_node_info_key())
-        node_num = int(node_info.get('node_num', 0))
-        logger.info(f"获取node_num: {node_num}")
-        return max(node_num, 1)
+        running_nodes_raw = node_info.get('running_nodes', '[]')
+        running_nodes = json.loads(running_nodes_raw)
+        logger.debug(f"获取活跃节点: {running_nodes}")
+        return running_nodes
 
     def _get_all_counter(self)->pl.DataFrame:
         """获取所有数据计数器
         - year: 年份
         - month: 月份
         - code: 股票代码
-        - count: 计数  
-        如果没有计数器，返回空df  
+        - accessed_nodes: 已访问此数据的节点ID列表
+        如果没有计数器，返回空df
         """
-        counter_pattern = f"{REDIS_PREFIX_MANAGER.counter_prefix}:*"  
+        counter_pattern = f"{REDIS_PREFIX_MANAGER.counter_prefix}:*"
 
-        result_list = [] 
+        result_list = []
         cursor = 0
         while True:
-            # 调用 scan：cursor 是上一次返回的游标，初始为0
             cursor, keys = self.client.scan(cursor=cursor, match=counter_pattern, count=5000)
-            
-            # 处理本次返回的键（即使 keys 为空，也不提前 break）
-            if keys:  # 只有有键时才处理，避免空循环
+
+            if keys:
                 values = self.client.mget(keys)
-                # 你的解析逻辑...（不变）
                 for key, value in zip(keys, values):
                     if value is None:
                         continue
@@ -424,32 +420,51 @@ class DataExpirationMonitor:
                     year = int(key_parts[-3])
                     month = int(key_parts[-2])
                     code = key_parts[-1]
-                    count = int(value)
-    
+
+                    # 解析节点ID列表
+                    try:
+                        accessed_nodes = json.loads(value)
+                        if not isinstance(accessed_nodes, list):
+                            logger.warning(f"计数器格式错误: {key}，期望列表，得到 {type(accessed_nodes)}")
+                            continue
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.warning(f"解析计数器失败: {key}, 错误: {e}")
+                        continue
+
                     result_list.append(
                         pl.DataFrame({
                             'year': [year],
                             'month': [month],
                             'code': [code],
-                            'count': [count]
+                            'accessed_nodes': [accessed_nodes]
+                        }, schema={
+                            'year': pl.Int64,
+                            'month': pl.Int64,
+                            'code': pl.Utf8,
+                            'accessed_nodes': pl.List(pl.Utf8)
                         })
                     )
-    
-            # 核心终止条件：cursor=0 表示遍历完毕
+
             if cursor == 0:
-                break  # 只有游标回到0，才终止循环
-        
-        if result_list:            
+                break
+
+        if result_list:
             return pl.concat(result_list)
         else:
-            return pl.DataFrame()
+            # 返回有正确schema的空DataFrame
+            return pl.DataFrame({
+                'year': pl.Series([], dtype=pl.Int64),
+                'month': pl.Series([], dtype=pl.Int64),
+                'code': pl.Series([], dtype=pl.Utf8),
+                'accessed_nodes': pl.Series([], dtype=pl.List(pl.Utf8))
+            })
 
     def _expiration_loop(self):
-        """数据过期循环
-        1.遍历所有数据计数器，如果计数器的计数大于等于node_num * clean_up_threshold，则启动倒计时，倒计时结束后，删除数据
-        2.如果计数>=node_num，则只删除数据片，保留计数器以便查看访问路径
-        3.检测和清理孤岛数据（不与当前加载年份连续的过期年份）：只对数据片设 TTL，保留计数器
-        4.检测和清理高使用率数据（计数 >= node_num * clean_up_threshold），避免重复设置TTL
+        """数据过期循环 - 简化的新逻辑
+        1. 获取所有活跃节点
+        2. 检查每个数据片是否被所有活跃节点访问过
+        3. 如果是，则删除数据片（保留计数器用于调试）
+        4. 保持孤岛数据清理功能
         """
         while self.started:
             counter_df = self._get_all_counter()  # 获取所有数据计数器
@@ -461,24 +476,38 @@ class DataExpirationMonitor:
                     check_interval=1.0,
                 ):
                     break
-                continue  
+                continue
 
-            # 1.判断哪些已经被全部访问 
-            all_visited_df = counter_df.filter(pl.col('count') >= self._get_node_num())
+            # 获取当前活跃节点
+            running_nodes = set(self._get_running_nodes())
+            if not running_nodes:
+                # 没有活跃节点，等待
+                if not interruptible_sleep(
+                    self._expiration_param.get('interval', 30),
+                    lambda: self.started,
+                    check_interval=1.0,
+                ):
+                    break
+                continue
 
-            # 初始化删除用的 Pipeline
-            delete_pipeline = self.client.pipeline(transaction=False)  # 非事务模式，更快
-            if not all_visited_df.is_empty():
-                # 批量收集删除命令（无需循环执行，一次性添加到 Pipeline）
-                for row in all_visited_df.to_dicts():
-                    year, month, code = row['year'], row['month'], row['code']
-                    # 只删除 train_slice，保留 counter 便于查看访问路径
-                    delete_pipeline.delete(REDIS_PREFIX_MANAGER.build_train_slice_key(year, month, code))
-                # 一次性执行所有删除命令（核心优化！）
-                delete_pipeline.execute()
+            # 找出可以清理的数据片（所有活跃节点都访问过）
+            cleanup_candidates = []
+            for row in counter_df.to_dicts():
+                accessed_nodes = set(row['accessed_nodes'])
 
-            # 从df中移除这些数据
-            counter_df = counter_df.join(all_visited_df, on=['year','month','code'], how='anti')
+                # 如果所有活跃节点都访问过此数据片，则可以清理
+                if running_nodes.issubset(accessed_nodes):
+                    cleanup_candidates.append((row['year'], row['month'], row['code']))
+
+            # 批量删除数据片
+            if cleanup_candidates:
+                delete_pipeline = self.client.pipeline(transaction=False)
+                for year, month, code in cleanup_candidates:
+                    slice_key = REDIS_PREFIX_MANAGER.build_train_slice_key(year, month, code)
+                    delete_pipeline.delete(slice_key)
+
+                deleted_count = len(delete_pipeline.execute())
+                logger.info(f"清理数据片: {deleted_count} 个, 活跃节点: {sorted(running_nodes)}")
 
             # 2.检测和清理孤岛数据（不与当前加载年份连续的过期年份）
             current_isolated_years = self._detect_isolated_years()
@@ -499,65 +528,6 @@ class DataExpirationMonitor:
                 if removed_years:
                     self._marked_isolated_years -= removed_years
                     logger.debug(f"清理已过期孤岛年份标记: {sorted(removed_years)}")
-
-            # 从df中移除孤岛年份的数据（使用当前检测到的所有孤岛年份）
-            if current_isolated_years and not counter_df.is_empty():
-                isolated_years_df = pl.DataFrame({'year': list(current_isolated_years)})
-                counter_df = counter_df.join(isolated_years_df, on='year', how='anti')
-
-            # 3.判断哪些需要启动倒计时（高使用率数据）
-            clean_up_threshold = self._expiration_param.get('clean_up_threshold', 0.85)
-            clean_up_countdown = self._expiration_param.get('clean_up_countdown', 300)
-            need_countdown_df = counter_df.filter(pl.col('count') >= self._get_node_num() * clean_up_threshold)
-
-            # 找出新增的高使用率数据（之前未标记清理的）
-            if not need_countdown_df.is_empty():
-                current_need_cleanup = set((row['year'], row['month'], row['code']) for row in need_countdown_df.to_dicts())
-                new_need_cleanup = current_need_cleanup - self._marked_for_cleanup
-
-                # 只对新增的高使用率数据设置TTL
-                if new_need_cleanup:
-                    set_pipeline = self.client.pipeline(transaction=False)
-                    # 批量收集 set 命令
-                    for year, month, code in new_need_cleanup:
-                        set_pipeline.set(
-                            REDIS_PREFIX_MANAGER.build_counter_key(year, month, code),
-                            clean_up_countdown
-                        )
-                    # 一次性执行所有 set 命令
-                    set_pipeline.execute()
-
-                    # 将新增的数据片加入已标记集合
-                    self._marked_for_cleanup.update(new_need_cleanup)
-                    logger.info(f"新增高使用率数据标记清理: {len(new_need_cleanup)} 个，累计标记: {len(self._marked_for_cleanup)} 个")
-
-            # 定期清理已不存在数据片的标记（避免集合无限增长）
-            if len(self._marked_for_cleanup) > 0:
-                existing_slices = set()
-                # 获取当前所有存在的计数器键
-                counter_pattern = f"{REDIS_PREFIX_MANAGER.counter_prefix}:*"
-                cursor = 0
-                try:
-                    while True:
-                        cursor, keys = self.client.scan(cursor=cursor, match=counter_pattern, count=1000)
-                        for key in keys:
-                            parts = key.split(':')
-                            if len(parts) >= 6:
-                                try:
-                                    year, month, code = int(parts[-3]), int(parts[-2]), parts[-1]
-                                    existing_slices.add((year, month, code))
-                                except (ValueError, IndexError):
-                                    continue
-                        if cursor == 0:
-                            break
-                except Exception as e:
-                    logger.warning(f"扫描计数器键失败: {e}")
-
-                # 移除已不存在数据片的标记
-                removed_slices = self._marked_for_cleanup - existing_slices
-                if removed_slices:
-                    self._marked_for_cleanup -= removed_slices
-                    logger.debug(f"清理已删除数据片的标记: {len(removed_slices)} 个")
 
             # 循环休眠，避免空转占用CPU（可中断，便于停止时快速退出）
             if not interruptible_sleep(

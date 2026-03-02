@@ -253,8 +253,8 @@ class TrainDataUpdater:
             # 构建Redis键并加入管道（顺序：先计数器，后数据片）
             train_slice_key = REDIS_PREFIX_MANAGER.build_train_slice_key(year, month, code)
             counter_key = REDIS_PREFIX_MANAGER.build_counter_key(year, month, code)
-            # 1. 先创建计数器（标记数据即将存在）
-            redis_pipeline.set(counter_key, 0, ex=72000)
+            # 1. 先创建计数器（初始化为空列表）
+            redis_pipeline.set(counter_key, "[]", ex=72000)
             # 2. 再创建数据片
             redis_pipeline.set(train_slice_key, slice_value, ex=72000)
         

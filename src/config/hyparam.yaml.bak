@@ -15,7 +15,7 @@ stock_pool:
   segment_seed: 43 # 分段种子    
 
 # 种子
-meta_seed: 43
+meta_seed: # 396,408 
 
 # 节点 meta：由主机提供
 # 【顶层 = 固定】

@@ -1,6 +1,6 @@
 stock_pool:
   pool_type: balance_and_clean
-  increment: 2014
+  increment: false
   mask_start_year: null # 开始年份掩码
   data_filter:
     exclude_st: true
@@ -9,10 +9,10 @@ stock_pool:
   segment_num: 2
   segment_cursor: 2
   segment_seed: 43
-meta_seed: 396
+meta_seed: 408 
 meta:
   checkpoint: true
-  start_year: 2019
+  start_year: 2004
   end_year: 2024
   earliest_year_month:
   - 1997
@@ -110,8 +110,6 @@ redis_redundancy:
 redis_expiration:
   isolated_data_exp: 1200
   interval: 60
-  clean_up_threshold: 1
-  clean_up_countdown: 300
 updater_retry:
   max_retries: 10
   retry_delay: 3
