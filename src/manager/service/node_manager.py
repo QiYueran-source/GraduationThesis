@@ -41,16 +41,17 @@ logger = get_module_logger(__name__,'[NodeManager]')
 
 class NodeManager:
     def __init__(self):
-        # 配置 
+        # 配置
         self._node_config = {}
         self._meta_param = {}
-        self._meta_seed = None  
+        self._meta_seed = None
+        self._shutdown_confirm_count = 3  # 默认值
 
         # 线程管理
         self.monitor_started = False
         self._monitor_thread: Optional[threading.Thread] = None
         self._monitor_lock = threading.Lock()
-        
+
         # 等待节点完成相关
         self.waiting_for_nodes = False
         self._waiting_thread: Optional[threading.Thread] = None
@@ -61,7 +62,7 @@ class NodeManager:
 
         # 加载配置
         self._load_config()
-        
+
         # 注册消息处理器
         self._subscribe()
 
@@ -74,6 +75,7 @@ class NodeManager:
                 hyparam = yaml.safe_load(f) or {}
             self._meta_param = hyparam.get('meta', {})
             self._meta_seed = hyparam.get('meta_seed', None)
+            self._shutdown_confirm_count = hyparam.get('shutdown_confirm', {}).get('count', 3)
         except Exception as e:
             logger.error(f"加载配置失败: {e}")
             raise 
@@ -756,16 +758,17 @@ class NodeManager:
     # ============================ 等待节点完成 ============================
     def _waiting_loop(self, task_id: str):
         """等待所有运行指定 task_id 的节点完成
-        
+
         Args:
             task_id: 任务ID
         """
         check_interval = 30  # 检查间隔（秒）
         max_wait_time = 24 * 3600  # 最大等待时间（24小时，任务启动时挂上的等待）
         start_wait_time = time.time()
-        
-        logger.info(f'开始等待 task_id={task_id} 的所有节点完成')
-        
+        consecutive_empty_count = 0  # 连续空闲计数器
+
+        logger.info(f'开始等待 task_id={task_id} 的所有节点完成（需要连续{self._shutdown_confirm_count}次确认）')
+
         while self.waiting_for_nodes:
             try:
                 # 检查是否超时
@@ -773,27 +776,35 @@ class NodeManager:
                 if elapsed_time > max_wait_time:
                     logger.warning(f'等待节点完成超时（{max_wait_time}秒），task_id={task_id}')
                     break
-                
+
                 # 获取运行该 task_id 的节点
                 running_ports = self.get_all_running_task_port(task_id)
-                
+
                 if len(running_ports) == 0:
-                    logger.info(f'所有运行 task_id={task_id} 的节点已完成')
-                    # 发布 shutdown 事件
-                    self._publish_shutdown()
-                    break
+                    consecutive_empty_count += 1
+                    logger.info(f'检测到无运行节点 ({consecutive_empty_count}/{self._shutdown_confirm_count})，task_id={task_id}')
+
+                    if consecutive_empty_count >= self._shutdown_confirm_count:
+                        logger.info(f'连续{self._shutdown_confirm_count}次检测到无运行节点，确认任务完成，发布shutdown事件')
+                        # 发布 shutdown 事件
+                        self._publish_shutdown()
+                        break
                 else:
+                    # 有节点运行，重置计数器
+                    if consecutive_empty_count > 0:
+                        logger.info(f'检测到节点重新运行，重置确认计数器（{len(running_ports)}个节点在运行）')
+                        consecutive_empty_count = 0
                     logger.info(f'仍有 {len(running_ports)} 个节点在运行 task_id={task_id}，端口: {running_ports}')
-                
+
                 # 等待一段时间后继续检查（可中断）
                 if not interruptible_sleep(check_interval, lambda: self.waiting_for_nodes, check_interval=1.0):
                     break
-                
+
             except Exception as e:
                 logger.error(f'等待循环异常: {e}', exc_info=True)
                 if not interruptible_sleep(check_interval, lambda: self.waiting_for_nodes, check_interval=1.0):
                     break
-        
+
         logger.info(f'等待线程结束，task_id={task_id}')
 
     def _publish_shutdown(self):
