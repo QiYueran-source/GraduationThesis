@@ -1,6 +1,6 @@
 stock_pool:
   pool_type: balance_and_clean
-  increment: 2019
+  increment: 2004
   mask_start_year: null # 开始年份掩码
   data_filter:
     exclude_st: true
@@ -9,17 +9,17 @@ stock_pool:
   segment_num: 1
   segment_cursor: 1
   segment_seed: 43
-meta_seed: 408 
+meta_seed: 396 
 meta:
   checkpoint: true
-  start_year: 2020
+  start_year: 2009
   end_year: 2024
   earliest_year_month:
   - 1997
   - 1
   n: 1
   max_portfolios_num: 5000
-  short_limit: 0.0
+  short_limit: -0.5
   env_config:
     sample_and_shuffle_seed: 153
     rl_end_year: 2024

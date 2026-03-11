@@ -54,4 +54,7 @@ checkpoint/
 result/
 empirical/  
 baseline_sample.ipynb
+heter_sample.ipynb
+docs/过程资料/说明文档/other.md
+docs/notebook/
 
