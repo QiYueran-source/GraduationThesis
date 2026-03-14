@@ -1,18 +1,18 @@
 stock_pool:
   pool_type: balance_and_clean
-  increment: 2004
+  increment: 2019
   mask_start_year: null # 开始年份掩码
   data_filter:
     exclude_st: true
     exclude_fin: true
   data_quality_threshold: 0.8
-  segment_num: 1
-  segment_cursor: 1
+  segment_num: 2
+  segment_cursor: 2
   segment_seed: 43
 meta_seed: 396 
 meta:
   checkpoint: true
-  start_year: 2009
+  start_year: 2020
   end_year: 2024
   earliest_year_month:
   - 1997
@@ -115,3 +115,8 @@ updater_retry:
   retry_delay: 3
 shutdown_confirm:
   count: 3
+# 等待节点完成：检查间隔、最大等待时间、首次检查前延迟（等 monitor 写入 Redis）
+waiting:
+  check_interval: 30        # 检查间隔（秒）
+  max_wait_hours: 24        # 最大等待时间（小时）
+  first_delay_seconds: 90    # 首次检查前等待秒数，避免一开始查 Redis 无数据

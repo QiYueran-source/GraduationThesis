@@ -76,6 +76,12 @@ class NodeManager:
             self._meta_param = hyparam.get('meta', {})
             self._meta_seed = hyparam.get('meta_seed', None)
             self._shutdown_confirm_count = hyparam.get('shutdown_confirm', {}).get('count', 3)
+            wp = hyparam.get('waiting', {})
+            self._waiting_param = {
+                'check_interval': int(wp.get('check_interval', 30)),
+                'max_wait_hours': int(wp.get('max_wait_hours', 24)),
+                'first_delay_seconds': int(wp.get('first_delay_seconds', 90)),
+            }
         except Exception as e:
             logger.error(f"加载配置失败: {e}")
             raise 
@@ -241,7 +247,37 @@ class NodeManager:
         
         running_ports.sort(key=int)  # 按端口号排序
         logger.info(f"运行 task_id={task_id} 的端口数: {len(running_ports)}, 端口: {running_ports}")
-        return running_ports 
+        return running_ports
+
+    def _get_running_task_port_from_redis(self, task_id: str) -> List[str]:
+        """
+        从 Redis node_info 读取当前任务的在跑端口（不访问 node，不发起 TCP）。
+        若 Redis 当前 task_id 与传入不一致则返回 []。
+        """
+        task_id_key = REDIS_PREFIX_MANAGER.build_task_id_key()
+        raw = self._redis_client.get(task_id_key)
+        current_task_id = (raw.decode('utf-8') if isinstance(raw, bytes) else raw) if raw else None
+        if not current_task_id:
+            current_task_id = ""
+        if current_task_id != task_id:
+            return []
+        node_info_key = REDIS_PREFIX_MANAGER.build_node_info_key()
+        raw_info = self._redis_client.hgetall(node_info_key)
+        if not raw_info:
+            return []
+        # 兼容 bytes / str
+        nodes_record_raw = raw_info.get(b'nodes_record') or raw_info.get('nodes_record')
+        if nodes_record_raw is None:
+            return []
+        if isinstance(nodes_record_raw, bytes):
+            nodes_record_raw = nodes_record_raw.decode('utf-8')
+        try:
+            nodes = json.loads(nodes_record_raw)
+        except (TypeError, json.JSONDecodeError):
+            return []
+        running_ports = [str(n['port']) for n in nodes if isinstance(n, dict) and 'port' in n]
+        running_ports.sort(key=int)
+        return running_ports
 
     # ============================ 随机化生成节点meta数据 ============================
     def _parse_earliest_year_month(self, val: Any) -> Tuple[int, int]:
@@ -757,46 +793,60 @@ class NodeManager:
 
     # ============================ 等待节点完成 ============================
     def _waiting_loop(self, task_id: str):
-        """等待所有运行指定 task_id 的节点完成
-
-        Args:
-            task_id: 任务ID
-        """
-        check_interval = 30  # 检查间隔（秒）
-        max_wait_time = 24 * 3600  # 最大等待时间（24小时，任务启动时挂上的等待）
+        """等待所有运行指定 task_id 的节点完成（从 Redis 读 node_info，不访问 node）。"""
+        check_interval = self._waiting_param['check_interval']
+        max_wait_hours = self._waiting_param['max_wait_hours']
+        max_wait_time = max_wait_hours * 3600
+        first_delay = self._waiting_param['first_delay_seconds']
         start_wait_time = time.time()
-        consecutive_empty_count = 0  # 连续空闲计数器
+        consecutive_empty_count = 0
+        check_round = 0
 
-        logger.info(f'开始等待 task_id={task_id} 的所有节点完成（需要连续{self._shutdown_confirm_count}次确认）')
+        logger.info(
+            f'开始等待 task_id={task_id} 的所有节点完成（需连续{self._shutdown_confirm_count}次确认，'
+            f'检查间隔={check_interval}s，最大等待={max_wait_hours}h）'
+        )
+        logger.info(f'首次检查前等待 {first_delay}s，待 monitor 写入 Redis 后再开始检查')
+        if not interruptible_sleep(first_delay, lambda: self.waiting_for_nodes, check_interval=1.0):
+            logger.info(f'首次延迟期间被中断，等待线程退出，task_id={task_id}')
+            return
+        logger.info(f'首次延迟结束，开始按间隔 {check_interval}s 从 Redis 检查节点状态，task_id={task_id}')
 
         while self.waiting_for_nodes:
             try:
-                # 检查是否超时
                 elapsed_time = time.time() - start_wait_time
                 if elapsed_time > max_wait_time:
-                    logger.warning(f'等待节点完成超时（{max_wait_time}秒），task_id={task_id}')
+                    logger.warning(f'等待节点完成超时（{max_wait_hours}h），task_id={task_id}')
                     break
 
-                # 获取运行该 task_id 的节点
-                running_ports = self.get_all_running_task_port(task_id)
+                check_round += 1
+                running_ports = self._get_running_task_port_from_redis(task_id)
+                logger.info(
+                    f'第 {check_round} 次检查（Redis）: task_id={task_id}, '
+                    f'在跑端口数={len(running_ports)}, 端口={running_ports}'
+                )
 
                 if len(running_ports) == 0:
                     consecutive_empty_count += 1
-                    logger.info(f'检测到无运行节点 ({consecutive_empty_count}/{self._shutdown_confirm_count})，task_id={task_id}')
-
+                    logger.info(
+                        f'检测到无运行节点 ({consecutive_empty_count}/{self._shutdown_confirm_count})，task_id={task_id}'
+                    )
                     if consecutive_empty_count >= self._shutdown_confirm_count:
-                        logger.info(f'连续{self._shutdown_confirm_count}次检测到无运行节点，确认任务完成，发布shutdown事件')
-                        # 发布 shutdown 事件
+                        logger.info(
+                            f'连续{self._shutdown_confirm_count}次检测到无运行节点，确认任务完成，发布 shutdown 事件'
+                        )
                         self._publish_shutdown()
                         break
                 else:
-                    # 有节点运行，重置计数器
                     if consecutive_empty_count > 0:
-                        logger.info(f'检测到节点重新运行，重置确认计数器（{len(running_ports)}个节点在运行）')
+                        logger.info(
+                            f'检测到节点重新运行，重置确认计数器（{len(running_ports)} 个节点在运行），task_id={task_id}'
+                        )
                         consecutive_empty_count = 0
-                    logger.info(f'仍有 {len(running_ports)} 个节点在运行 task_id={task_id}，端口: {running_ports}')
+                    logger.info(
+                        f'等待 {check_interval}s 后进行下一次检查，task_id={task_id}，当前在跑: {running_ports}'
+                    )
 
-                # 等待一段时间后继续检查（可中断）
                 if not interruptible_sleep(check_interval, lambda: self.waiting_for_nodes, check_interval=1.0):
                     break
 
