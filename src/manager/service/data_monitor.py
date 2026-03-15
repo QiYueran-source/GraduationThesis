@@ -352,7 +352,7 @@ DATA_REDUNDANCY_MONITOR = DataRedundancyMonitor()
 
 class DataExpirationMonitor:
     def __init__(self):
-        """数据过期监控器：根据 node_info 中的 running_nodes 与数据访问计数器判断并清理过期数据。"""
+        """数据过期监控器：根据 node_info.nodes_record 解析出的活跃节点与数据访问计数器判断并清理过期数据。"""
         # redis客户端
         self.client = REDIS_CONNECTOR.get_client()
 
@@ -383,12 +383,29 @@ class DataExpirationMonitor:
             raise 
 
     def _get_running_nodes(self) -> List[str]:
-        """获取活跃节点ID列表"""
+        """从 node_info.nodes_record 解析活跃节点 ID 列表。保留 tmp_node：占位时无真实节点会报 tmp_node，
+        故 running_nodes.issubset(accessed_nodes) 永不为真，不会触发清除；monitor 覆盖后无 tmp_node，逻辑正常。"""
         node_info = self.client.hgetall(REDIS_PREFIX_MANAGER.build_node_info_key())
-        running_nodes_raw = node_info.get('running_nodes', '[]')
-        running_nodes = json.loads(running_nodes_raw)
-        logger.debug(f"获取活跃节点: {running_nodes}")
-        return running_nodes
+        if not node_info:
+            return []
+        raw = node_info.get(b'nodes_record') or node_info.get('nodes_record')
+        if raw is None:
+            return []
+        if isinstance(raw, bytes):
+            raw = raw.decode('utf-8')
+        try:
+            records = json.loads(raw)
+        except (TypeError, json.JSONDecodeError):
+            return []
+        if not isinstance(records, list):
+            return []
+        node_ids = [
+            str(r.get('node_id')).strip()
+            for r in records
+            if isinstance(r, dict) and r.get('node_id')
+        ]
+        logger.debug(f"获取活跃节点: {node_ids}")
+        return node_ids
 
     def _get_all_counter(self)->pl.DataFrame:
         """获取所有数据计数器

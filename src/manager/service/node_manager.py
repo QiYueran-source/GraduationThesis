@@ -656,7 +656,7 @@ class NodeManager:
         节点监控循环
         - 首次检查延后 interval×first_delay_multiplier 秒（默认 3 倍），避免启动时写出空节点列表导致数据过期误删
         - 之后每 interval 秒查询所有节点状态，仅统计当前 task_id（Redis 中的 task_id）的节点
-        - 保存到 Redis (gt:system:node_info)：running_nodes、last_update、nodes_record
+        - 保存到 Redis (gt:system:node_info)：last_update、nodes_record（running_nodes 由消费方从 nodes_record 解析）
         - 若无当前 task_id 或无在跑节点，则 nodes_record=[]，保留字段结构
         """
         monitor_config = self._node_config.get('monitor', {})
@@ -697,13 +697,9 @@ class NodeManager:
                         'current_year_month': status.get('current_year_month'),
                     })
                 
-                # 活跃节点ID列表
-                running_node_ids = [node['node_id'] for node in current_nodes if node.get('node_id')]
-
-                # 两字段：running_nodes、last_update、nodes_record
+                # 只写 nodes_record 与 last_update；running_nodes 由消费方从 nodes_record 解析
                 node_info_key = REDIS_PREFIX_MANAGER.build_node_info_key()
                 node_info_data = {
-                    'running_nodes': json.dumps(running_node_ids),
                     'last_update': str(int(time.time())),
                     'nodes_record': json.dumps(current_nodes, ensure_ascii=False),
                 }
@@ -914,7 +910,6 @@ class NodeManager:
             {"port": -1, "node_id": "tmp_node", "pid": None, "current_year_month": None}
         ]
         node_info_data = {
-            'running_nodes': '[]',
             'last_update': str(int(time.time())),
             'nodes_record': json.dumps(placeholder_record, ensure_ascii=False),
         }
