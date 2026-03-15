@@ -352,10 +352,7 @@ DATA_REDUNDANCY_MONITOR = DataRedundancyMonitor()
 
 class DataExpirationMonitor:
     def __init__(self):
-        """数据过期监控器
-        1.获取node_info中的node_num
-        2.获取
-        """
+        """数据过期监控器：根据 node_info 中的 running_nodes 与数据访问计数器判断并清理过期数据。"""
         # redis客户端
         self.client = REDIS_CONNECTOR.get_client()
 

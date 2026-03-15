@@ -654,10 +654,10 @@ class NodeManager:
     def _monitor_loop(self):
         """
         节点监控循环
-        - 首次检查延后 interval×first_delay_multiplier 秒（默认 3 倍），避免启动时写出 node_num=0 导致数据过期误删
+        - 首次检查延后 interval×first_delay_multiplier 秒（默认 3 倍），避免启动时写出空节点列表导致数据过期误删
         - 之后每 interval 秒查询所有节点状态，仅统计当前 task_id（Redis 中的 task_id）的节点
-        - 保存到 Redis (gt:system:node_info)：node_num、last_update、nodes_record（三字段，无冗余）
-        - 若无当前 task_id 或无在跑节点，则 node_num=0，nodes_record=[]，保留字段结构
+        - 保存到 Redis (gt:system:node_info)：running_nodes、last_update、nodes_record
+        - 若无当前 task_id 或无在跑节点，则 nodes_record=[]，保留字段结构
         """
         monitor_config = self._node_config.get('monitor', {})
         interval = float(monitor_config.get('interval', 120))
@@ -665,7 +665,7 @@ class NodeManager:
 
         logger.info(f"节点监控器启动，监控间隔: {interval} 秒")
 
-        # 首次检查延后，避免启动时节点尚未就绪写出 node_num=0，导致数据过期逻辑按 1 删除
+        # 首次检查延后，避免启动时节点尚未就绪写出空节点列表，导致数据过期逻辑误删
         first_delay = interval * first_delay_multiplier
         logger.info(f"首次节点检查延后 {first_delay:.0f} 秒（interval×{first_delay_multiplier}），避免误删未拉齐数据")
         if not interruptible_sleep(first_delay, lambda: self.monitor_started, check_interval=1.0):
@@ -907,16 +907,19 @@ class NodeManager:
 
     # ============================ init / start 消息handler ============================
     def _init_node_info_with_port_count(self) -> None:
-        """在启动冗余监控前，将 node_info 的 node_num 初始化为配置的暴露端口数量，避免过期监控误删数据。"""
+        """在启动冗余监控前，将 node_info 初始化：nodes_record 写入占位，避免 waiting 在 monitor 未写入前误判无节点而 shutdown；由 _monitor_loop 后续覆盖。"""
         start_port, end_port, port_count = self._get_port_range()
         node_info_key = REDIS_PREFIX_MANAGER.build_node_info_key()
+        placeholder_record = [
+            {"port": -1, "node_id": "tmp_node", "pid": None, "current_year_month": None}
+        ]
         node_info_data = {
-            'node_num': str(port_count),
+            'running_nodes': '[]',
             'last_update': str(int(time.time())),
-            'nodes_record': '[]',
+            'nodes_record': json.dumps(placeholder_record, ensure_ascii=False),
         }
         self._redis_client.hset(node_info_key, mapping=node_info_data)
-        logger.info(f"已初始化 node_info: node_num={port_count}（暴露端口数 {start_port}～{end_port}）")
+        logger.info(f"已初始化 node_info（暴露端口数 {start_port}～{end_port}），nodes_record 占位待 monitor 覆盖")
 
     def init_handler(self, message: Message):
         """处理 init：发布 start，等待 30s 后获取可用端口、生成 meta 并启动所有节点。"""
@@ -930,7 +933,7 @@ class NodeManager:
             return
         task_id = task_id_raw.decode('utf-8') if isinstance(task_id_raw, bytes) else str(task_id_raw)
         
-        # 先初始化 node_info（node_num=暴露端口数），再发 start，避免冗余/过期监控误删数据
+        # 先初始化 node_info，再发 start，避免冗余/过期监控误删数据
         self._init_node_info_with_port_count()
 
         # 初始化元数据

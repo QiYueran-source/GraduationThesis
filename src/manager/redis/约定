@@ -1,7 +1,6 @@
 # redis键值对
 
 # 不过期数据  
-# node数量 gt:node_num:int  
 
 # 节点元数据(node_id在节点上设定)  
 # gt:node_id:元数据(json)
