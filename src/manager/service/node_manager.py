@@ -448,6 +448,9 @@ class NodeManager:
             'env_config': dict(copy.deepcopy(meta.get('env_config') or {})),
             'performance_config': dict(copy.deepcopy(meta.get('performance_config') or {})),
             'short_limit': float(meta.get('short_limit', 0.0)),
+            'use_mlp_predict': bool(meta.get('use_mlp_predict', False)),
+            'mix_weight': float(meta.get('mix_weight', 0.0)),
+            'mlp_predict_config': dict(copy.deepcopy(meta.get('mlp_predict_config') or {})),
             'checkpoint': bool(meta.get('checkpoint', False)),
             'factors_list': [],  # 由节点本地提供
         }

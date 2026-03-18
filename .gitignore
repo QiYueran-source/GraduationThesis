@@ -55,6 +55,8 @@ result/
 empirical/  
 baseline_sample.ipynb
 heter_sample.ipynb
+sample_on_ma.ipynb
 docs/过程资料/说明文档/other.md
 docs/notebook/
+mv_task_with_shift.py
 
