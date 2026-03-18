@@ -1,18 +1,18 @@
 stock_pool:
   pool_type: balance_and_clean
-  increment: false
+  increment: 2009
   mask_start_year: null # 开始年份掩码
   data_filter:
     exclude_st: true
     exclude_fin: true
   data_quality_threshold: 0.8
   segment_num: 2
-  segment_cursor: 1
+  segment_cursor: 2
   segment_seed: 43
 meta_seed: 396
 meta:
   checkpoint: true
-  start_year: 2004
+  start_year: 2014
   end_year: 2024
   earliest_year_month:
   - 1997
@@ -27,7 +27,6 @@ meta:
     epochs: 20
     batch_size: 32
     init: he
-  mask_seed: 42
   mix_weight: 0.3 # 混合权重 
   short_limit: -0.25
   env_config:
