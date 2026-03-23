@@ -1,34 +1,34 @@
 stock_pool:
   pool_type: balance_and_clean
-  increment: 2009
+  increment: false
   mask_start_year: null # 开始年份掩码
   data_filter:
     exclude_st: true
     exclude_fin: true
   data_quality_threshold: 0.8
   segment_num: 2
-  segment_cursor: 2
+  segment_cursor: 1
   segment_seed: 43
 meta_seed: 396
 meta:
-  checkpoint: true
-  start_year: 2014
+  checkpoint: false
+  start_year: 2004
   end_year: 2024
   earliest_year_month:
   - 1997
   - 1
   n: 1
   max_portfolios_num: 5000
-  use_mlp_predict: True # 使用预测而非决策 
+  use_mlp_predict: false # 使用预测而非决策 
   mlp_predict_config: # 预测模型配置
     hidden_dim: 80
     weight_decay: 0.005
     lr: 0.001
-    epochs: 20
+    epochs: 1
     batch_size: 32
     init: he
-  mix_weight: 0.3 # 混合权重 
-  short_limit: -0.25
+  mix_weight: 0.15 # 混合权重 
+  short_limit: 0
   env_config:
     sample_and_shuffle_seed: 153
     rl_end_year: 2024
